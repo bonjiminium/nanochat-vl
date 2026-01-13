@@ -3,7 +3,7 @@ import modal, subprocess
 app = modal.App("nanochat-vl-speedrun")
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2")
+    .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2", "wandb")
     .add_local_dir('.', '/root')
 )
 
@@ -41,12 +41,12 @@ def test_muon():
         print(f"step {i}: {loss.item():.4f}")
     print(f"Loss decreased: {losses[0]:.4f} -> {losses[-1]:.4f}")
 
-@app.function(image=image, timeout=180, gpu="L4")
-def test_train():
+@app.function(image=image, timeout=180, gpu="L4", secrets=[modal.Secret.from_name("wandb-secret")])
+def test_train(run: str = "dummy"):
     import subprocess
     subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
     subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
-    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=10", "--core_max_per_task=3"], check=True)
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=10", "--core_max_per_task=3", f"--run={run}"], check=True)
 
 @app.function(image=image, timeout=120, gpu="L4")
 def test_dataloader():
@@ -104,10 +104,10 @@ def test_core():
     print(f"CORE metric (untrained, 5/task): {results['core_metric']:.4f}")
 
 @app.local_entrypoint()
-def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = ""):
+def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
     if test == "gpt": return test_gpt.remote()
     if test == "muon": return test_muon.remote()
-    if test == "train": return test_train.remote()
+    if test == "train": return test_train.remote(run=run)
     if test == "dataloader": return test_dataloader.remote()
     if test == "bpb": return test_bpb.remote()
     if test == "core": return test_core.remote()

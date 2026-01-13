@@ -4,6 +4,10 @@ Common utilities for nanochat-vl.
 
 import os, requests
 
+class DummyWandb:
+    def log(self, *args, **kwargs): pass
+    def finish(self): pass
+
 def download_file(url, path):
     if os.path.exists(path): return path
     print(f"Downloading {url}...")

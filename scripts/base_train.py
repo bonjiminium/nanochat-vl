@@ -6,7 +6,7 @@ import torch
 from nanochat_vl.gpt import GPT, GPTConfig
 from nanochat_vl.dataloader import data_loader
 from nanochat_vl.muon import Muon
-from nanochat_vl.common import get_base_dir
+from nanochat_vl.common import get_base_dir, DummyWandb
 from nanochat_vl.tokenizer import get_token_bytes
 from nanochat_vl.loss_eval import evaluate_bpb
 from nanochat_vl.tokenizer import get_tokenizer
@@ -30,6 +30,7 @@ parser.add_argument('--eval_every', type=int, default=250)
 parser.add_argument('--eval_tokens', type=int, default=20*524288)
 parser.add_argument('--core_metric_every', type=int, default=2000)
 parser.add_argument('--core_max_per_task', type=int, default=500)
+parser.add_argument('--run', type=str, default='dummy')
 args = parser.parse_args()
 
 assert args.total_batch_size % args.device_batch_size == 0
@@ -56,18 +57,25 @@ token_bytes = get_token_bytes(device='cuda')
 
 tokenizer = get_tokenizer()
 
+if args.run == 'dummy': wandb_run = DummyWandb()
+else:
+    import wandb
+    wandb_run = wandb.init(project='nanochat-vl', name=args.run, config=vars(args))
+
 def run_eval(step):
     model.eval()
     val_loader = data_loader(args.device_batch_size, args.max_seq_len, 'val', device='cuda')
     eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len)
     bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
     print(f"step {step:4d} | val_bpb {bpb:.4f}")
+    wandb_run.log(dict(step=step, val_bpb=bpb))
     model.train()
 
 def run_core_eval(step):
     model.eval()
     results = evaluate_model(model, tokenizer, 'cuda', max_per_task=args.core_max_per_task)
     print(f"step {step:4d} | core_metric {results['core_metric']:.4f}")
+    wandb_run.log(dict(step=step, core_metric=results['core_metric']))
     model.train()
 
 for step in range(args.num_iterations):
@@ -94,4 +102,7 @@ for step in range(args.num_iterations):
     
     dt = time.time() - t0
     tokens_per_sec = args.total_batch_size * args.max_seq_len / dt
+    wandb_run.log(dict(step=step, loss=total_loss, lr_mult=lr_mult, tokens_per_sec=tokens_per_sec))
     print(f"step {step:4d} | loss {total_loss:.4f} | lr_mult {lr_mult:.2f} | {tokens_per_sec:.0f} tok/s | {dt*1000:.0f}ms")
+
+wandb_run.finish()
