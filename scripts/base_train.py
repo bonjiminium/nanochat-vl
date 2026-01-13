@@ -62,13 +62,17 @@ else:
     import wandb
     wandb_run = wandb.init(project='nanochat-vl', name=args.run, config=vars(args))
 
+val_bpb, min_val_bpb = None, float('inf')
+
 def run_eval(step):
+    global val_bpb, min_val_bpb
     model.eval()
     val_loader = data_loader(args.device_batch_size, args.max_seq_len, 'val', device='cuda')
     eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len)
-    bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
-    print(f"step {step:4d} | val_bpb {bpb:.4f}")
-    wandb_run.log(dict(step=step, val_bpb=bpb))
+    val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
+    if val_bpb < min_val_bpb: min_val_bpb = val_bpb
+    print(f"step {step:4d} | val_bpb {val_bpb:.4f}")
+    wandb_run.log(dict(step=step, val_bpb=val_bpb))
     model.train()
 
 def run_core_eval(step):
@@ -106,3 +110,9 @@ for step in range(args.num_iterations):
     print(f"step {step:4d} | loss {total_loss:.4f} | lr_mult {lr_mult:.2f} | {tokens_per_sec:.0f} tok/s | {dt*1000:.0f}ms")
 
 wandb_run.finish()
+
+from nanochat_vl.report import get_report
+get_report().log(section="Base model training", data=[
+    vars(args),
+    dict(num_params=model.num_params(), num_iterations=args.num_iterations, final_loss=total_loss, final_val_bpb=val_bpb, min_val_bpb=min_val_bpb),
+])

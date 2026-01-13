@@ -41,13 +41,18 @@ def test_muon():
         print(f"step {i}: {loss.item():.4f}")
     print(f"Loss decreased: {losses[0]:.4f} -> {losses[-1]:.4f}")
 
-@app.function(image=image, timeout=180, gpu="L4", secrets=[modal.Secret.from_name("wandb-secret")])
-def test_train(run: str = "dummy"):
-    import subprocess
+@app.function(image=image, timeout=300, gpu="L4", secrets=[modal.Secret.from_name("wandb-secret")])
+def test_train(run: str = "dummy", git_info: dict = None, bloat_info: dict = None):
+    import os, subprocess
+    from nanochat_vl.common import get_base_dir
+    from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
+    report = get_report()
+    report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
     subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
     subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
     subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=10", "--core_max_per_task=3", f"--run={run}"], check=True)
-
+    report.generate()
+    print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 @app.function(image=image, timeout=120, gpu="L4")
 def test_dataloader():
     import subprocess
@@ -107,7 +112,9 @@ def test_core():
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
     if test == "gpt": return test_gpt.remote()
     if test == "muon": return test_muon.remote()
-    if test == "train": return test_train.remote(run=run)
+    if test == "train":
+        from nanochat_vl.report import get_git_info, get_bloat_info
+        return test_train.remote(run=run, git_info=get_git_info(), bloat_info=get_bloat_info())
     if test == "dataloader": return test_dataloader.remote()
     if test == "bpb": return test_bpb.remote()
     if test == "core": return test_core.remote()

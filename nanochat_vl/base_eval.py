@@ -43,4 +43,7 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
         centered_results[label] = centered
         print(f"acc: {accuracy:.4f} | centered: {centered:.4f} | {time.time() - t0:.1f}s")
     core_metric = sum(centered_results.values()) / len(centered_results)
+    print(f"CORE metric: {core_metric:.4f}")
+    from nanochat_vl.report import get_report
+    get_report().log(section="Base model evaluation", data=[dict(core_metric=core_metric), centered_results])
     return dict(results=results, centered_results=centered_results, core_metric=core_metric)
