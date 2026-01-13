@@ -1,6 +1,11 @@
 "Utilities for generating training report cards."
 
 import os, datetime, subprocess, socket, platform, re, shutil
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("America/New_York")
+
+def now_str(): return datetime.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 def run_command(cmd):
     try:
@@ -94,10 +99,9 @@ def extract_timestamp(content, prefix):
     return None
 
 def generate_header(git_info, bloat_info, gpu_info, sys_info, cost_info, dep_count):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     header = f"""# nanochat-vl training report
 
-Generated: {timestamp}
+Generated: {now_str()}
 
 ## Environment
 
@@ -222,10 +226,9 @@ class Report:
         if os.path.exists(report_file): os.remove(report_file)
         header = generate_header(git_info, bloat_info, gpu_info, sys_info, cost_info, dep_count)
         header_file = os.path.join(self.report_dir, "header.md")
-        start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(header_file, "w", encoding="utf-8") as f:
             f.write(header)
-            f.write(f"Run started: {start_time}\n\n---\n\n")
+            f.write(f"Run started: {now_str()}\n\n---\n\n")
         print(f"Reset report and wrote header to {header_file}")
 
     def log(self, section, data):
@@ -233,7 +236,7 @@ class Report:
         path = os.path.join(self.report_dir, f"{slug}.md")
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"## {section}\n")
-            f.write(f"timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write(f"timestamp: {now_str()}\n\n")
             for item in data:
                 if not item: continue
                 if isinstance(item, str): f.write(item + "\n")
