@@ -46,7 +46,7 @@ def test_train():
     import subprocess
     subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
     subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
-    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024"], check=True)
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=10", "--core_max_per_task=3"], check=True)
 
 @app.function(image=image, timeout=120, gpu="L4")
 def test_dataloader():
