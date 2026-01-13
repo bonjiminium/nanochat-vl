@@ -51,15 +51,18 @@ def get_system_info():
     return info
 
 def estimate_cost(gpu_info, runtime_hours=None):
-    gpu_hourly_rates = dict(H100=3.00, A100=1.79, V100=0.55)
-    default_rate = 2.0
+    gpu_hourly_rates = {'B200': 6.25, 'H200': 4.54, 'H100': 3.95, 'L40S': 1.95, 'A10': 1.10, 'L4': 0.80, 'T4': 0.59}
+    default_rate = 3.0
     if not gpu_info.get("available"): return None
     hourly_rate = None
     gpu_name = gpu_info["names"][0] if gpu_info["names"] else "unknown"
-    for gpu_type, rate in gpu_hourly_rates.items():
-        if gpu_type in gpu_name:
-            hourly_rate = rate * gpu_info["count"]
-            break
+    if 'A100' in gpu_name:
+        hourly_rate = (2.50 if '80GB' in gpu_name else 2.10) * gpu_info["count"]
+    else:
+        for gpu_type, rate in gpu_hourly_rates.items():
+            if gpu_type in gpu_name:
+                hourly_rate = rate * gpu_info["count"]
+                break
     if hourly_rate is None: hourly_rate = default_rate * gpu_info["count"]
     return dict(hourly_rate=hourly_rate, gpu_type=gpu_name, estimated_total=hourly_rate * runtime_hours if runtime_hours else None)
 
