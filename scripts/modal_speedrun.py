@@ -50,6 +50,7 @@ def test_train(run: str = "dummy", git_info: dict = None, bloat_info: dict = Non
     report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
     subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
     subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    subprocess.run(["python", "-m", "scripts.tok_eval"], check=True)
     subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=10", "--core_max_per_task=3", f"--run={run}"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
@@ -108,6 +109,17 @@ def test_core():
     results = evaluate_model(model, tokenizer, 'cuda', max_per_task=5)
     print(f"CORE metric (untrained, 5/task): {results['core_metric']:.4f}")
 
+@app.function(image=image, timeout=180, gpu="L4")
+def test_checkpoint():
+    import subprocess, os
+    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    print("=== Training 5 steps, saving every 2 ===")
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=5", "--warmup_iters=1", "--cooldown_iters=1", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=100", "--core_metric_every=-1", "--save_every=2"], check=True)
+    print("=== Resuming from step 4, training to 8 ===")
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=8", "--warmup_iters=1", "--cooldown_iters=1", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=100", "--core_metric_every=-1", "--save_every=2", "--resume_from=-1"], check=True)
+    print("=== Checkpoint test passed ===")
+
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
     if test == "gpt": return test_gpt.remote()
@@ -118,6 +130,7 @@ def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65
     if test == "dataloader": return test_dataloader.remote()
     if test == "bpb": return test_bpb.remote()
     if test == "core": return test_core.remote()
+    if test == "checkpoint": return test_checkpoint.remote()
     from nanochat_vl.report import get_git_info, get_bloat_info
     git_info, bloat_info = get_git_info(), get_bloat_info()
     speedrun.remote(n_shards, max_chars, vocab_size, git_info, bloat_info)

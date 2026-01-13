@@ -11,6 +11,7 @@ from nanochat_vl.tokenizer import get_token_bytes
 from nanochat_vl.loss_eval import evaluate_bpb
 from nanochat_vl.tokenizer import get_tokenizer
 from nanochat_vl.base_eval import evaluate_model
+from nanochat_vl.checkpoint_manager import save_checkpoint, load_checkpoint, find_last_step
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--depth', type=int, default=12)
@@ -31,10 +32,16 @@ parser.add_argument('--eval_tokens', type=int, default=20*524288)
 parser.add_argument('--core_metric_every', type=int, default=2000)
 parser.add_argument('--core_max_per_task', type=int, default=500)
 parser.add_argument('--run', type=str, default='dummy')
+parser.add_argument('--save_every', type=int, default=-1)
+parser.add_argument('--resume_from', type=int, default=-1)
 args = parser.parse_args()
 
 assert args.total_batch_size % args.device_batch_size == 0
 grad_accum_steps = args.total_batch_size // args.device_batch_size
+
+base_dir = get_base_dir()
+checkpoint_dir = os.path.join(base_dir, "base_checkpoints", f"d{args.depth}")
+start_step = 0
 
 cfg = GPTConfig(seq_len=args.max_seq_len, vocab_size=args.vocab_size, n_layer=args.depth, n_head=args.n_head, n_kv_head=args.n_head, n_embd=args.n_embd)
 model = GPT(cfg).cuda().bfloat16()
@@ -44,6 +51,16 @@ print(f"Model: {model.num_params():,} parameters")
 matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
 adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr}], betas=(0.9, 0.95), weight_decay=0.0)
 muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
+
+if args.resume_from >= 0 or (args.resume_from == -1 and os.path.exists(checkpoint_dir)):
+    resume_step = args.resume_from if args.resume_from >= 0 else find_last_step(checkpoint_dir)
+    if resume_step is not None:
+        model_data, optim_data, meta_data = load_checkpoint(checkpoint_dir, resume_step, 'cuda', load_optimizer=True)
+        model.load_state_dict(model_data)
+        adamw.load_state_dict(optim_data['adamw'])
+        muon.load_state_dict(optim_data['muon'])
+        start_step = resume_step + 1
+        print(f"Resumed from step {resume_step}")
 
 def get_lr_mult(step):
     if step < args.warmup_iters: return step / args.warmup_iters
@@ -82,7 +99,14 @@ def run_core_eval(step):
     wandb_run.log(dict(step=step, core_metric=results['core_metric']))
     model.train()
 
-for step in range(args.num_iterations):
+def do_checkpoint(step):
+    model_data = model.state_dict()
+    optim_data = dict(adamw=adamw.state_dict(), muon=muon.state_dict())
+    meta_data = dict(step=step, val_bpb=val_bpb, min_val_bpb=min_val_bpb, config=vars(args))
+    save_checkpoint(checkpoint_dir, step, model_data, optim_data, meta_data)
+    print(f"Saved checkpoint at step {step}")
+
+for step in range(start_step, args.num_iterations):
     if step % args.eval_every == 0: run_eval(step)
     if args.core_metric_every > 0 and step % args.core_metric_every == 0: run_core_eval(step)
     t0 = time.time()
@@ -108,7 +132,9 @@ for step in range(args.num_iterations):
     tokens_per_sec = args.total_batch_size * args.max_seq_len / dt
     wandb_run.log(dict(step=step, loss=total_loss, lr_mult=lr_mult, tokens_per_sec=tokens_per_sec))
     print(f"step {step:4d} | loss {total_loss:.4f} | lr_mult {lr_mult:.2f} | {tokens_per_sec:.0f} tok/s | {dt*1000:.0f}ms")
+    if args.save_every > 0 and (step + 1) % args.save_every == 0: do_checkpoint(step)
 
+if args.save_every <= 0 or args.num_iterations % args.save_every != 0: do_checkpoint(args.num_iterations - 1)
 wandb_run.finish()
 
 from nanochat_vl.report import get_report
