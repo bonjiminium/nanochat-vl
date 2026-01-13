@@ -52,6 +52,7 @@ def test_train(run: str = "dummy", git_info: dict = None, bloat_info: dict = Non
     subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
     subprocess.run(["python", "-m", "scripts.tok_eval"], check=True)
     subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=10", "--core_max_per_task=3", f"--run={run}"], check=True)
+    subprocess.run(["python", "-m", "scripts.base_loss", "--eval_tokens=1024", "--device_batch_size=4"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 @app.function(image=image, timeout=120, gpu="L4")
@@ -120,6 +121,27 @@ def test_checkpoint():
     subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=8", "--warmup_iters=1", "--cooldown_iters=1", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=100", "--core_metric_every=-1", "--save_every=2", "--resume_from=-1"], check=True)
     print("=== Checkpoint test passed ===")
 
+@app.function(image=image, timeout=180)
+def test_report(git_info: dict = None, bloat_info: dict = None):
+    import time, os
+    from nanochat_vl.common import get_base_dir
+    from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count, extract_timestamp
+    report = get_report()
+    report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
+    header_path = os.path.join(get_base_dir(), "report", "header.md")
+    print(f"Header content:\n{open(header_path).read()}")
+    print("Sleeping 90 seconds...")
+    time.sleep(90)
+    report.log(section="Base model training", data=[{"test": "value"}])
+    section_path = os.path.join(get_base_dir(), "report", "base-model-training.md")
+    print(f"Section content:\n{open(section_path).read()}")
+    with open(header_path) as f: start_time = extract_timestamp(f.read(), "Run started: ")
+    with open(section_path) as f: end_time = extract_timestamp(f.read(), "timestamp: ")
+    print(f"Extracted start_time: {start_time}")
+    print(f"Extracted end_time: {end_time}")
+    report.generate()
+    print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
+
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
     if test == "gpt": return test_gpt.remote()
@@ -131,6 +153,9 @@ def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65
     if test == "bpb": return test_bpb.remote()
     if test == "core": return test_core.remote()
     if test == "checkpoint": return test_checkpoint.remote()
+    if test == "report":
+        from nanochat_vl.report import get_git_info, get_bloat_info
+        return test_report.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
     from nanochat_vl.report import get_git_info, get_bloat_info
     git_info, bloat_info = get_git_info(), get_bloat_info()
     speedrun.remote(n_shards, max_chars, vocab_size, git_info, bloat_info)

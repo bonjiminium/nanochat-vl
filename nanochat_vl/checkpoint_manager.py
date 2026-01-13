@@ -17,12 +17,20 @@ def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
     optimizer_data = torch.load(os.path.join(checkpoint_dir, f"optim_{step:06d}.pt"), map_location=device) if load_optimizer else None
     return model_data, optimizer_data, meta_data
 
+def find_last_checkpoint_dir(base_checkpoint_dir):
+    subdirs = glob.glob(os.path.join(base_checkpoint_dir, "d*"))
+    for d in sorted(subdirs, reverse=True):
+        if glob.glob(os.path.join(d, "model_*.pt")): return d
+    return None
+
 def find_last_step(checkpoint_dir):
     files = glob.glob(os.path.join(checkpoint_dir, "model_*.pt"))
     if not files: return None
     return max(int(os.path.basename(f).split("_")[-1].split(".")[0]) for f in files)
 
 def build_model(checkpoint_dir, step, device, phase="eval"):
+    if step is None: step = find_last_step(checkpoint_dir)
+    if step is None: raise FileNotFoundError(f"No checkpoints in {checkpoint_dir}")
     model_data, _, meta_data = load_checkpoint(checkpoint_dir, step, device, load_optimizer=False)
     model_data = {k.removeprefix("_orig_mod."): v for k, v in model_data.items()}
     cfg = GPTConfig(**meta_data["model_config"])
@@ -36,6 +44,7 @@ def build_model(checkpoint_dir, step, device, phase="eval"):
 
 def load_model(source, device, phase="eval", step=None):
     base_dir = get_base_dir()
-    checkpoint_dir = os.path.join(base_dir, {"base": "base_checkpoints", "mid": "mid_checkpoints", "sft": "chatsft_checkpoints", "rl": "chatrl_checkpoints"}[source])
-    if step is None: step = find_last_step(checkpoint_dir)
+    base_checkpoint_dir = os.path.join(base_dir, {"base": "base_checkpoints", "mid": "mid_checkpoints", "sft": "chatsft_checkpoints", "rl": "chatrl_checkpoints"}[source])
+    checkpoint_dir = find_last_checkpoint_dir(base_checkpoint_dir)
+    if checkpoint_dir is None: raise FileNotFoundError(f"No checkpoints in {base_checkpoint_dir}")
     return build_model(checkpoint_dir, step, device, phase)

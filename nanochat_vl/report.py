@@ -96,7 +96,7 @@ def extract(section, keys):
 def extract_timestamp(content, prefix):
     for line in content.split('\n'):
         if line.startswith(prefix):
-            time_str = line.split(":", 1)[1].strip()
+            time_str = line[len(prefix):].strip()
             try: return datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
             except: pass
     return None
@@ -171,7 +171,7 @@ class Report:
                 with open(header_file, "r", encoding="utf-8") as f:
                     header_content = f.read()
                     out_file.write(header_content)
-                    start_time = extract_timestamp(header_content, "Run started:")
+                    start_time = extract_timestamp(header_content, "Run started: ")
                     bloat_data = re.search(r"### Bloat\n(.*?)\n\n", header_content, re.DOTALL)
                     bloat_data = bloat_data.group(1) if bloat_data else ""
             else:
@@ -184,7 +184,7 @@ class Report:
                     print(f"Warning: {section_file} does not exist, skipping")
                     continue
                 with open(section_file, "r", encoding="utf-8") as in_file: section = in_file.read()
-                if "rl" not in file_name: end_time = extract_timestamp(section, "timestamp:")
+                if "rl" not in file_name: end_time = extract_timestamp(section, "timestamp: ")
                 if file_name == "base-model-evaluation.md": final_metrics["base"] = extract(section, "CORE")
                 if file_name == "chat-evaluation-mid.md": final_metrics["mid"] = extract(section, chat_metrics)
                 if file_name == "chat-evaluation-sft.md": final_metrics["sft"] = extract(section, chat_metrics)
@@ -210,6 +210,7 @@ class Report:
                 for stage in stages: row += f" {str(final_metrics.get(stage, {}).get(metric, '-')).ljust(value_width)} |"
                 out_file.write(row + "\n")
             out_file.write("\n")
+            print(f"DEBUG: start_time={start_time}, end_time={end_time}")
             if start_time and end_time:
                 duration = end_time - start_time
                 total_seconds = int(duration.total_seconds())

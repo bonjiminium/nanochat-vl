@@ -102,7 +102,8 @@ def run_core_eval(step):
 def do_checkpoint(step):
     model_data = model.state_dict()
     optim_data = dict(adamw=adamw.state_dict(), muon=muon.state_dict())
-    meta_data = dict(step=step, val_bpb=val_bpb, min_val_bpb=min_val_bpb, config=vars(args))
+    model_config = dict(seq_len=cfg.seq_len, vocab_size=cfg.vocab_size, n_layer=cfg.n_layer, n_head=cfg.n_head, n_kv_head=cfg.n_kv_head, n_embd=cfg.n_embd)
+    meta_data = dict(step=step, val_bpb=val_bpb, min_val_bpb=min_val_bpb, config=vars(args), model_config=model_config)
     save_checkpoint(checkpoint_dir, step, model_data, optim_data, meta_data)
     print(f"Saved checkpoint at step {step}")
 
