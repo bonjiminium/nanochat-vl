@@ -21,6 +21,33 @@ def speedrun(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int 
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
+@app.function(image=image, timeout=60, gpu="L4")
+def test_muon():
+    import torch
+    from nanochat_vl.gpt import GPT, GPTConfig
+    from nanochat_vl.muon import Muon
+    cfg = GPTConfig(seq_len=64, n_layer=2, n_head=2, n_kv_head=2, n_embd=64, vocab_size=256)
+    model = GPT(cfg).cuda().bfloat16()
+    model.init_weights()
+    opt = Muon(model.parameters(), lr=0.01)
+    losses = []
+    for i in range(10):
+        x = torch.randint(0, cfg.vocab_size, (4, 32)).cuda()
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16): loss = model(x, x)
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+        losses.append(loss.item())
+        print(f"step {i}: {loss.item():.4f}")
+    print(f"Loss decreased: {losses[0]:.4f} -> {losses[-1]:.4f}")
+
+@app.function(image=image, timeout=180, gpu="L4")
+def test_train():
+    import subprocess
+    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.05", "--unembedding_lr=0.001", "--matrix_lr=0.005"], check=True)
+
 @app.function(image=image, timeout=120, gpu="L4")
 def test_dataloader():
     import subprocess
@@ -46,6 +73,8 @@ def test_gpt():
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = ""):
     if test == "gpt": return test_gpt.remote()
+    if test == "muon": return test_muon.remote()
+    if test == "train": return test_train.remote()
     if test == "dataloader": return test_dataloader.remote()
     from nanochat_vl.report import get_git_info, get_bloat_info
     git_info, bloat_info = get_git_info(), get_bloat_info()
