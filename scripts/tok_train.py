@@ -1,9 +1,10 @@
 "Train a tokenizer using rustbpe in the style of GPT-4."
 
 import os, time, argparse, torch
-from nanochat_vl.tokenizer import RustBPETokenizer
+from nanochat_vl.tokenizer import RustBPETokenizer, SPECIAL_TOKENS
 from nanochat_vl.common import get_base_dir
 from nanochat_vl.dataset import parquets_iter_batched
+from nanochat_vl.report import get_report
 
 parser = argparse.ArgumentParser(description='Train a BPE tokenizer')
 parser.add_argument('--max_chars', type=int, default=10_000_000_000, help='Maximum characters to train on')
@@ -34,3 +35,13 @@ print(f"Saved tokenizer to {tokenizer_dir}")
 token_bytes = {i: len(tokenizer.decode([i]).encode('utf-8')) for i in range(tokenizer.get_vocab_size())}
 torch.save(token_bytes, os.path.join(tokenizer_dir, "token_bytes.pt"))
 print(f"Saved token_bytes to {tokenizer_dir}/token_bytes.pt")
+
+tb = torch.tensor(list(token_bytes.values()), dtype=torch.float32)
+tb_nonzero = tb[tb > 0]
+get_report().log(section="Tokenizer training", data=[
+    vars(args),
+    {"train_time": t1-t0},
+    {"num_special_tokens": len(SPECIAL_TOKENS)},
+    {"token_bytes_min": int(tb_nonzero.min().item()), "token_bytes_max": int(tb_nonzero.max().item()),
+     "token_bytes_mean": tb_nonzero.mean().item(), "token_bytes_std": tb_nonzero.std().item()},
+])

@@ -2,6 +2,7 @@
 
 from nanochat_vl.tokenizer import get_tokenizer, RustBPETokenizer
 from nanochat_vl.dataset import parquets_iter_batched
+from nanochat_vl.report import get_report
 
 news_text = r"""(Washington, D.C., July 9, 2025)- Yesterday, Mexico's National Service of Agro-Alimentary Health, Safety, and Quality (SENASICA) reported a new case of New World Screwworm (NWS) in Ixhuatlan de Madero, Veracruz in Mexico, which is approximately 160 miles northward of the current sterile fly dispersal grid."""
 
@@ -44,13 +45,30 @@ def main():
     gpt2 = RustBPETokenizer.from_pretrained("gpt2")
     gpt4 = RustBPETokenizer.from_pretrained("cl100k_base")
     texts = get_text_samples()
+    results = {k: {} for k in ["gpt2", "gpt4", "ours"]}
     
     print(f"\n{'Text':<15} {'GPT-2':>10} {'GPT-4':>10} {'Ours':>10}")
     print("-" * 47)
     
     for name, text in texts.items():
         r_gpt2, r_gpt4, r_ours = compression_ratio(gpt2, text), compression_ratio(gpt4, text), compression_ratio(ours, text)
+        nbytes = len(text.encode('utf-8'))
+        results["gpt2"][name] = dict(bytes=nbytes, tokens=len(gpt2.encode(text)), ratio=r_gpt2)
+        results["gpt4"][name] = dict(bytes=nbytes, tokens=len(gpt4.encode(text)), ratio=r_gpt4)
+        results["ours"][name] = dict(bytes=nbytes, tokens=len(ours.encode(text)), ratio=r_ours)
         ref = max(r_gpt2, r_gpt4)
         print(f"{name:<15} {r_gpt2:>10.3f} {r_gpt4:>10.3f} {colorize(r_ours, ref):>20}")
+    
+    lines = []
+    for baseline_name, baseline_key in [("GPT-2", "gpt2"), ("GPT-4", "gpt4")]:
+        lines.append(f"### Comparison with {baseline_name}\n")
+        lines.append(f"| Text | Bytes | {baseline_name} Tokens | {baseline_name} Ratio | Ours Tokens | Ours Ratio | Diff % |")
+        lines.append("|------|-------|-------------|-------------|-------------|------------|--------|")
+        for name in texts:
+            b, o = results[baseline_key][name], results["ours"][name]
+            diff = ((b['tokens'] - o['tokens']) / b['tokens']) * 100
+            lines.append(f"| {name} | {b['bytes']} | {b['tokens']} | {b['ratio']:.2f} | {o['tokens']} | {o['ratio']:.2f} | {diff:+.1f}% |")
+        lines.append("")
+    get_report().log(section="Tokenizer evaluation", data=["\n".join(lines)])
 
 if __name__ == "__main__": main()
