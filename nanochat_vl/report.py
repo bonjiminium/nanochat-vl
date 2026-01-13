@@ -1,7 +1,6 @@
 "Utilities for generating training report cards."
 
 import os, datetime, subprocess, socket, platform, re, shutil
-import psutil
 
 def run_command(cmd):
     try:
@@ -33,7 +32,7 @@ def get_gpu_info():
     return info
 
 def get_system_info():
-    import torch
+    import torch, psutil
     info = {}
     info['hostname'] = socket.gethostname()
     info['platform'] = platform.system()
