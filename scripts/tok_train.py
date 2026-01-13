@@ -32,11 +32,12 @@ os.makedirs(tokenizer_dir, exist_ok=True)
 tokenizer.save(tokenizer_dir)
 print(f"Saved tokenizer to {tokenizer_dir}")
 
-token_bytes = {i: len(tokenizer.decode([i]).encode('utf-8')) for i in range(tokenizer.get_vocab_size())}
+special_set = set(SPECIAL_TOKENS)
+token_bytes = torch.tensor([0 if tokenizer.decode([i]) in special_set else len(tokenizer.decode([i]).encode('utf-8')) for i in range(tokenizer.get_vocab_size())], dtype=torch.int32)
 torch.save(token_bytes, os.path.join(tokenizer_dir, "token_bytes.pt"))
 print(f"Saved token_bytes to {tokenizer_dir}/token_bytes.pt")
 
-tb = torch.tensor(list(token_bytes.values()), dtype=torch.float32)
+tb = token_bytes.float()
 tb_nonzero = tb[tb > 0]
 get_report().log(section="Tokenizer training", data=[
     vars(args),

@@ -7,6 +7,8 @@ from nanochat_vl.gpt import GPT, GPTConfig
 from nanochat_vl.dataloader import data_loader
 from nanochat_vl.muon import Muon
 from nanochat_vl.common import get_base_dir
+from nanochat_vl.tokenizer import get_token_bytes
+from nanochat_vl.loss_eval import evaluate_bpb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--depth', type=int, default=12)
@@ -22,6 +24,8 @@ parser.add_argument('--unembedding_lr', type=float, default=0.004)
 parser.add_argument('--matrix_lr', type=float, default=0.02)
 parser.add_argument('--warmup_iters', type=int, default=100)
 parser.add_argument('--cooldown_iters', type=int, default=400)
+parser.add_argument('--eval_every', type=int, default=250)
+parser.add_argument('--eval_tokens', type=int, default=20*524288)
 args = parser.parse_args()
 
 assert args.total_batch_size % args.device_batch_size == 0
@@ -44,7 +48,18 @@ def get_lr_mult(step):
 train_loader = data_loader(args.device_batch_size, args.max_seq_len, 'train', device='cuda')
 model.train()
 
+token_bytes = get_token_bytes(device='cuda')
+
+def run_eval(step):
+    model.eval()
+    val_loader = data_loader(args.device_batch_size, args.max_seq_len, 'val', device='cuda')
+    eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len)
+    bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
+    print(f"step {step:4d} | val_bpb {bpb:.4f}")
+    model.train()
+
 for step in range(args.num_iterations):
+    if step % args.eval_every == 0: run_eval(step)
     t0 = time.time()
     lr_mult = get_lr_mult(step)
     adamw.param_groups[0]['lr'] = args.embedding_lr * lr_mult

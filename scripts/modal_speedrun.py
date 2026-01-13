@@ -70,12 +70,30 @@ def test_gpt():
         loss = model(x, x)
     print(f"Params: {model.num_params():,}, Loss: {loss.item():.4f}")
 
+@app.function(image=image, timeout=180, gpu="L4")
+def test_bpb():
+    import subprocess, torch
+    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    from nanochat_vl.gpt import GPT, GPTConfig
+    from nanochat_vl.dataloader import data_loader
+    from nanochat_vl.tokenizer import get_token_bytes
+    from nanochat_vl.loss_eval import evaluate_bpb
+    cfg = GPTConfig(seq_len=64, n_layer=2, n_head=2, n_kv_head=2, n_embd=128, vocab_size=4096)
+    model = GPT(cfg).cuda().bfloat16()
+    model.init_weights()
+    token_bytes = get_token_bytes(device="cuda")
+    loader = data_loader(B=4, T=64, split="train", device="cuda")
+    bpb = evaluate_bpb(model, loader, steps=10, token_bytes=token_bytes)
+    print(f"BPB (untrained): {bpb:.4f}")
+
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = ""):
     if test == "gpt": return test_gpt.remote()
     if test == "muon": return test_muon.remote()
     if test == "train": return test_train.remote()
     if test == "dataloader": return test_dataloader.remote()
+    if test == "bpb": return test_bpb.remote()
     from nanochat_vl.report import get_git_info, get_bloat_info
     git_info, bloat_info = get_git_info(), get_bloat_info()
     speedrun.remote(n_shards, max_chars, vocab_size, git_info, bloat_info)
