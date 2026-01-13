@@ -1,7 +1,7 @@
 "Utilities for generating training report cards."
 
 import os, datetime, subprocess, socket, platform, re, shutil
-import torch, psutil
+import psutil
 
 def run_command(cmd):
     try:
@@ -21,6 +21,7 @@ def get_git_info():
     return info
 
 def get_gpu_info():
+    import torch
     if not torch.cuda.is_available(): return {"available": False}
     num_devices = torch.cuda.device_count()
     info = dict(available=True, count=num_devices, names=[], memory_gb=[])
@@ -32,6 +33,7 @@ def get_gpu_info():
     return info
 
 def get_system_info():
+    import torch
     info = {}
     info['hostname'] = socket.gethostname()
     info['platform'] = platform.system()
