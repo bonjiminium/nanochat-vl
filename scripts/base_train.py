@@ -108,7 +108,7 @@ def do_checkpoint(step):
     print(f"Saved checkpoint at step {step}")
 
 for step in range(start_step, args.num_iterations):
-    if step % args.eval_every == 0: run_eval(step)
+    if args.eval_every > 0 and step % args.eval_every == 0: run_eval(step)
     if args.core_metric_every > 0 and step % args.core_metric_every == 0: run_core_eval(step)
     t0 = time.time()
     lr_mult = get_lr_mult(step)

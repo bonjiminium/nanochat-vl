@@ -6,6 +6,7 @@ import torch
 from nanochat_vl.checkpoint_manager import load_model
 from nanochat_vl.tokenizer import get_tokenizer
 from tasks.arc import ARC
+from tasks.mmlu import MMLU
 
 def run_categorical_eval(task_object, tokenizer, model, batch_size, max_problems=None):
     "Run categorical (multiple choice) evaluation."
@@ -49,8 +50,9 @@ def run_chat_eval(task_name, model, tokenizer, batch_size=8, max_problems=None):
     task_module = {
         'ARC-Easy': partial(ARC, subset="ARC-Easy", split="test"),
         'ARC-Challenge': partial(ARC, subset="ARC-Challenge", split="test"),
+        'MMLU': partial(MMLU, subset="all", split="test"),
     }[task_name]
-    task_object = task_module()
+    task_object = task_module(stop=max_problems) if max_problems else task_module()
     if task_object.eval_type == 'categorical': return run_categorical_eval(task_object, tokenizer, model, batch_size, max_problems)
     raise ValueError(f"Unsupported eval type: {task_object.eval_type}")
 
@@ -66,8 +68,8 @@ if __name__ == "__main__":
     model = torch.compile(model)
     tokenizer = get_tokenizer()
 
-    all_tasks = ['ARC-Easy', 'ARC-Challenge']
-    baseline_accuracies = {'ARC-Easy': 0.25, 'ARC-Challenge': 0.25}
+    all_tasks = ['ARC-Easy', 'ARC-Challenge', 'MMLU']
+    baseline_accuracies = {'ARC-Easy': 0.25, 'ARC-Challenge': 0.25, 'MMLU': 0.25}
     task_names = all_tasks if args.task_name is None else args.task_name.split('|')
 
     results = {}
