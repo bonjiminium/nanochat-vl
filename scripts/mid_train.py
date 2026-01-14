@@ -101,3 +101,6 @@ for step in range(args.num_iterations):
 
 final_loss = loss.item() * grad_accum_steps
 print(f"Training complete. Final loss: {final_loss:.4f}, min_val_bpb: {min_val_bpb:.4f}")
+
+from nanochat_vl.report import get_report
+get_report().log(section="Midtraining", data=[vars(args), dict(num_iterations=args.num_iterations, min_val_bpb=min_val_bpb)])
