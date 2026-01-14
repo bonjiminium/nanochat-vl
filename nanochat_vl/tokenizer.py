@@ -117,6 +117,16 @@ class RustBPETokenizer:
 
         return ids[:max_tokens], mask[:max_tokens]
 
+    def render_for_completion(self, conversation):
+        "Render conversation priming the Assistant for a completion (no mask needed)."
+        conversation = copy.deepcopy(conversation)
+        messages = conversation["messages"]
+        assert messages[-1]["role"] == "assistant", "Last message must be from the Assistant"
+        messages.pop()
+        ids, _ = self.render_conversation(conversation)
+        ids.append(self.encode_special("<|assistant_start|>"))
+        return ids
+
     def save(self, tokenizer_dir):
         os.makedirs(tokenizer_dir, exist_ok=True)
         pickle_path = os.path.join(tokenizer_dir, "tokenizer.pkl")

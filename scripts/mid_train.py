@@ -32,11 +32,10 @@ assert args.total_batch_size % args.device_batch_size == 0
 grad_accum_steps = args.total_batch_size // args.device_batch_size
 
 base_dir = get_base_dir()
-base_checkpoint_dir = os.path.join(base_dir, "base_checkpoints")
-mid_checkpoint_dir = os.path.join(base_dir, "mid_checkpoints")
 
 model, _, meta = load_model("base", "cuda", phase="train", step=args.base_step if args.base_step >= 0 else None)
 model_config = GPTConfig(**meta["model_config"])
+mid_checkpoint_dir = os.path.join(base_dir, "mid_checkpoints", f"d{model_config.n_layer}")
 model = model.bfloat16()
 print(f"Loaded model: {model.num_params():,} parameters")
 

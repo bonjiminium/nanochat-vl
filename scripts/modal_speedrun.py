@@ -142,7 +142,7 @@ def test_report(git_info: dict = None, bloat_info: dict = None):
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
-@app.function(image=image, timeout=300, gpu="L4", secrets=[modal.Secret.from_name("huggingface-secret")])
+@app.function(image=image, timeout=600, gpu="L4", secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_mid_train(git_info: dict = None, bloat_info: dict = None):
     import os, subprocess
     from nanochat_vl.common import get_base_dir
@@ -154,7 +154,8 @@ def test_mid_train(git_info: dict = None, bloat_info: dict = None):
     subprocess.run(["python", "-m", "scripts.tok_eval"], check=True)
     subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
     subprocess.run(["python", "-m", "scripts.base_loss", "--eval_tokens=1024", "--device_batch_size=4"], check=True)
-    subprocess.run(["python", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5"], check=True)
+    subprocess.run(["python", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
+    subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "mid", "-x", "20"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
