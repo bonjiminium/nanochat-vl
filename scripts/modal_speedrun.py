@@ -143,7 +143,7 @@ def test_report(git_info: dict = None, bloat_info: dict = None):
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
 @app.function(image=image, timeout=600, gpu="L4", secrets=[modal.Secret.from_name("huggingface-secret")])
-def test_mid_train(git_info: dict = None, bloat_info: dict = None):
+def test_sft(git_info: dict = None, bloat_info: dict = None):
     import os, subprocess
     from nanochat_vl.common import get_base_dir
     from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
@@ -156,6 +156,8 @@ def test_mid_train(git_info: dict = None, bloat_info: dict = None):
     subprocess.run(["python", "-m", "scripts.base_loss", "--eval_tokens=1024", "--device_batch_size=4"], check=True)
     subprocess.run(["python", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
     subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "mid", "-x", "20"], check=True)
+    subprocess.run(["python", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
+    subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "sft", "-x", "20"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
@@ -200,9 +202,9 @@ def test_smoltalk():
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
     if test == "smoltalk": return test_smoltalk.remote()
     if test == "mid_dataloader": return test_mid_dataloader.remote()
-    if test == "mid_train":
+    if test == "sft":
         from nanochat_vl.report import get_git_info, get_bloat_info
-        return test_mid_train.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
+        return test_sft.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
     if test == "gpt": return test_gpt.remote()
     if test == "muon": return test_muon.remote()
     if test == "train":
