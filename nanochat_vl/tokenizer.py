@@ -73,6 +73,50 @@ class RustBPETokenizer:
     def __call__(self, *args, **kwargs): return self.encode(*args, **kwargs)
     def decode(self, ids): return self.enc.decode(ids)
 
+    def render_conversation(self, conversation, max_tokens=2048):
+        """
+        Tokenize a single Chat conversation.
+        Returns:
+        - ids: list[int] of token ids
+        - mask: list[int] of same length, mask=1 for tokens the assistant should train on
+        """
+        ids, mask = [], []
+        def add_tokens(token_ids, mask_val):
+            if isinstance(token_ids, int): token_ids = [token_ids]
+            ids.extend(token_ids)
+            mask.extend([mask_val] * len(token_ids))
+
+        # Merge system message into first user message if present
+        messages = conversation["messages"]
+        if messages[0]["role"] == "system":
+            conversation = copy.deepcopy(conversation)
+            messages = conversation["messages"]
+            assert messages[1]["role"] == "user"
+            messages[1]["content"] = messages[0]["content"] + "\n\n" + messages[1]["content"]
+            messages = messages[1:]
+
+        # Special tokens
+        bos = self.get_bos_token_id()
+        user_start = self.encode_special("<|user_start|>")
+        user_end = self.encode_special("<|user_end|>")
+        assistant_start = self.encode_special("<|assistant_start|>")
+        assistant_end = self.encode_special("<|assistant_end|>")
+
+        # Render
+        add_tokens(bos, 0)
+        for message in messages:
+            content = message["content"]
+            if message["role"] == "user":
+                add_tokens(user_start, 0)
+                add_tokens(self.encode(content), 0)
+                add_tokens(user_end, 0)
+            elif message["role"] == "assistant":
+                add_tokens(assistant_start, 0)
+                add_tokens(self.encode(content), 1)  # mask=1: supervise these
+                add_tokens(assistant_end, 1)
+
+        return ids[:max_tokens], mask[:max_tokens]
+
     def save(self, tokenizer_dir):
         os.makedirs(tokenizer_dir, exist_ok=True)
         pickle_path = os.path.join(tokenizer_dir, "tokenizer.pkl")

@@ -3,7 +3,7 @@ import modal, subprocess
 app = modal.App("nanochat-vl-speedrun")
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2", "wandb")
+    .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2", "wandb", "datasets")
     .add_local_dir('.', '/root')
 )
 
@@ -142,8 +142,56 @@ def test_report(git_info: dict = None, bloat_info: dict = None):
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
+@app.function(image=image, timeout=300, gpu="L4", secrets=[modal.Secret.from_name("huggingface-secret")])
+def test_mid_train():
+    import subprocess
+    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=-1", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
+    subprocess.run(["python", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5"], check=True)
+
+@app.function(image=image, timeout=60, gpu="L4")
+def test_mid_dataloader():
+    import subprocess
+    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    from tasks.smoltalk import SmolTalk
+    from nanochat_vl.tokenizer import get_tokenizer
+    from nanochat_vl.mid_dataloader import mid_data_generator
+    ds = SmolTalk(split="train", stop=100)
+    tokenizer = get_tokenizer()
+    gen = mid_data_generator(ds, tokenizer, batch_size=4, seq_len=64, device="cuda")
+    x, y = next(gen)
+    print(f"x: {x.shape}, y: {y.shape}, x.dtype: {x.dtype}, y.dtype: {y.dtype}")
+    print(f"x[0,:10]: {x[0,:10].tolist()}")
+    print(f"y[0,:10]: {y[0,:10].tolist()}")
+    x2, y2 = next(gen)
+    print(f"Second batch x[0,:10]: {x2[0,:10].tolist()}")
+
+@app.function(image=image, timeout=60, gpu="L4")
+def test_smoltalk():
+    import subprocess
+    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    from tasks.smoltalk import SmolTalk
+    from nanochat_vl.tokenizer import get_tokenizer
+    ds = SmolTalk(split="train", stop=5)
+    print(f"len(ds) = {len(ds)}")
+    ex = ds[0]
+    print(f"Example keys: {ex.keys()}")
+    print(f"Num messages: {len(ex['messages'])}")
+    print(f"First message role: {ex['messages'][0]['role']}")
+    # Test render_conversation
+    tokenizer = get_tokenizer()
+    ids, mask = tokenizer.render_conversation(ex)
+    print(f"ids length: {len(ids)}, mask length: {len(mask)}")
+    print(f"mask sum (supervised tokens): {sum(mask)}")
+    print(f"First 20 ids: {ids[:20]}")
+    print(f"First 20 mask: {mask[:20]}")
+
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
+    if test == "smoltalk": return test_smoltalk.remote()
+    if test == "mid_dataloader": return test_mid_dataloader.remote()
+    if test == "mid_train": return test_mid_train.remote()
     if test == "gpt": return test_gpt.remote()
     if test == "muon": return test_muon.remote()
     if test == "train":
