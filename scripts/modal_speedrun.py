@@ -1,6 +1,7 @@
 import modal, subprocess
 
 app = modal.App("nanochat-vl-speedrun")
+volume = modal.Volume.from_name("nanochat-vl-data", create_if_missing=True)
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2", "wandb", "datasets")
@@ -214,8 +215,27 @@ def test_smoltalk():
     print(f"First 20 ids: {ids[:20]}")
     print(f"First 20 mask: {mask[:20]}")
 
+@app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume})
+def test_volume():
+    import os
+    os.environ["NANOCHAT_VL_BASE_DIR"] = "/data"
+    from pathlib import Path
+    from nanochat_vl.common import get_base_dir
+    tok_path = Path(get_base_dir()) / "tokenizer"
+    if tok_path.exists():
+        print(f"Tokenizer found at {tok_path}, loading...")
+        from nanochat_vl.tokenizer import get_tokenizer
+        tok = get_tokenizer()
+        print(f"Loaded tokenizer with vocab_size={tok.get_vocab_size()}")
+    else:
+        print(f"No tokenizer at {tok_path}, training...")
+        subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--vocab_size", "4096", "--max_chars", "10000000"], check=True)
+        print("Saved tokenizer to volume")
+    volume.commit()
+
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
+    if test == "volume": return test_volume.remote()
     if test == "chat_eval": return test_chat_eval.remote()
     if test == "mmlu": return test_mmlu.remote()
     if test == "smoltalk": return test_smoltalk.remote()
