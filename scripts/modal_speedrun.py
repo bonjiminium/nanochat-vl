@@ -259,6 +259,22 @@ def test_vlm():
     print(f"VLM forward pass successful! Loss: {loss.item():.4f}")
     volume.commit()
 
+@app.function(image=image, timeout=900, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
+def test_vl_train():
+    import os, subprocess
+    os.environ["NANOCHAT_VL_BASE_DIR"] = "/data"
+    from pathlib import Path
+    from nanochat_vl.common import get_base_dir
+    base = Path(get_base_dir())
+    if not (base / "tokenizer").exists(): subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--vocab_size", "4096", "--max_chars", "10000000"], check=True)
+    if not (base / "base_data").exists(): subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    if not (base / "base_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.0003", "--unembedding_lr=0.00001", "--matrix_lr=0.00003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
+    if not (base / "mid_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_iterations=12", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=12", "--matrix_lr=0.0002", "--use_muon=0"], check=True)
+    if not (base / "chatsft_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=256", "--eval_every=5", "--save_every=10", "--use_muon=0"], check=True)
+    print("=== Running VL train for 20 steps ===")
+    subprocess.run(["python", "-u", "-m", "scripts.vl_train", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--lr_vision=1e-4", "--lr_projector=1e-4", "--lr_lm=0", "--use_muon=0"], check=True)
+    volume.commit()
+
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume})
 def test_volume():
     import os
@@ -280,6 +296,7 @@ def test_volume():
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
     if test == "vlm": return test_vlm.remote()
+    if test == "vl_train": return test_vl_train.remote()
     if test == "volume": return test_volume.remote()
     if test == "chat_eval": return test_chat_eval.remote()
     if test == "mmlu": return test_mmlu.remote()
