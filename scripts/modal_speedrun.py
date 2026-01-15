@@ -4,7 +4,7 @@ app = modal.App("nanochat-vl-speedrun")
 volume = modal.Volume.from_name("nanochat-vl-data", create_if_missing=True)
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2", "wandb", "datasets")
+    .uv_pip_install("requests", "pyarrow", "rustbpe", "tiktoken", "torch", "numpy", "psutil", "pyyaml", "jinja2", "wandb", "datasets", "pillow")
     .add_local_dir('.', '/root')
 )
 
@@ -215,6 +215,50 @@ def test_smoltalk():
     print(f"First 20 ids: {ids[:20]}")
     print(f"First 20 mask: {mask[:20]}")
 
+@app.function(image=image, timeout=600, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
+def test_vlm():
+    import os, subprocess
+    os.environ["NANOCHAT_VL_BASE_DIR"] = "/data"
+    from pathlib import Path
+    from nanochat_vl.common import get_base_dir
+    base = Path(get_base_dir())
+    if not (base / "tokenizer").exists():
+        print("Training tokenizer...")
+        subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--vocab_size", "4096", "--max_chars", "10000000"], check=True)
+    if not (base / "base_data").exists():
+        subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    import shutil
+# RESTORE: uncomment these to skip retraining base/mid
+    if not (base / "base_checkpoints").exists():
+    # if (base / "base_checkpoints").exists(): shutil.rmtree(base / "base_checkpoints")
+        print("Training base model...")
+        subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.0003", "--unembedding_lr=0.00001", "--matrix_lr=0.00003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
+    # RESTORE: uncomment to skip retraining mid
+    if not (base / "mid_checkpoints").exists():
+    # if (base / "mid_checkpoints").exists(): shutil.rmtree(base / "mid_checkpoints")
+        print("Training mid model...")
+        subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_iterations=12", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=12", "--matrix_lr=0.0002", "--use_muon=0"], check=True)
+    # # RESTORE: uncomment to skip retraining sft
+    # if not (base / "chatsft_checkpoints").exists():
+    # RESTORE: uncomment to skip retraining SFT
+    if not (base / "chatsft_checkpoints").exists():
+    # if (base / "chatsft_checkpoints").exists(): shutil.rmtree(base / "chatsft_checkpoints")
+        print("Training SFT model...")
+        subprocess.run(["python", "-u", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=256", "--eval_every=5", "--save_every=10", "--use_muon=0"], check=True)
+    
+    import torch
+    from nanochat_vl.checkpoint_manager import load_model
+    from nanochat_vl.vlm import VLM
+    from nanochat_vl.vl_dataloader import vl_data_generator
+    model, tokenizer, meta = load_model("sft", "cuda")
+    vlm = VLM(model, img_size=64, patch_size=8, vision_dim=256).cuda()
+    test_data = [("a red apple", None), ("a yellow banana", None), ("a dog", None)]
+    gen = vl_data_generator(test_data, tokenizer, batch_size=2, img_size=64, max_seq_len=32, device="cuda")
+    imgs, inputs, targets = next(gen)
+    loss = vlm(imgs, inputs, targets)
+    print(f"VLM forward pass successful! Loss: {loss.item():.4f}")
+    volume.commit()
+
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume})
 def test_volume():
     import os
@@ -235,6 +279,7 @@ def test_volume():
 
 @app.local_entrypoint()
 def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
+    if test == "vlm": return test_vlm.remote()
     if test == "volume": return test_volume.remote()
     if test == "chat_eval": return test_chat_eval.remote()
     if test == "mmlu": return test_mmlu.remote()

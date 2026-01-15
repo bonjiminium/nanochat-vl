@@ -20,6 +20,7 @@ parser.add_argument('--num_iterations', type=int, default=100)
 parser.add_argument('--embedding_lr', type=float, default=0.02)
 parser.add_argument('--unembedding_lr', type=float, default=0.0004)
 parser.add_argument('--matrix_lr', type=float, default=0.002)
+parser.add_argument('--use_muon', type=int, default=1)
 parser.add_argument('--cooldown_iters', type=int, default=20)
 parser.add_argument('--eval_every', type=int, default=25)
 parser.add_argument('--eval_tokens', type=int, default=10*524288)
@@ -41,13 +42,18 @@ print(f"Loaded model: {model.num_params():,} parameters")
 
 matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
 adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr}], betas=(0.9, 0.95), weight_decay=0.0)
-muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
+if args.use_muon: muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
+else: muon = torch.optim.AdamW(matrix_params, lr=args.matrix_lr, betas=(0.9, 0.95), weight_decay=0.0)
 for opt in [adamw, muon]:
     for g in opt.param_groups: g['initial_lr'] = g['lr']
 
 def get_lr_mult(step):
     if step >= args.num_iterations - args.cooldown_iters: return (args.num_iterations - step) / args.cooldown_iters
     return 1.0
+
+def get_muon_momentum(step):
+    frac = min(step / 300, 1)
+    return (1 - frac) * 0.85 + frac * 0.95
 
 tokenizer = get_tokenizer()
 train_ds = SmolTalk(split="train")
@@ -63,13 +69,15 @@ else:
     import wandb
     wandb_run = wandb.init(project='nanochat-vl', name=args.run, config=vars(args))
 
-min_val_bpb = float('inf')
+min_val_bpb, val_bpb = float('inf'), float('inf')
 t0 = time.time()
 
 for step in range(args.num_iterations):
     lr_mult = get_lr_mult(step)
     for opt in [adamw, muon]:
         for g in opt.param_groups: g['lr'] = g['initial_lr'] * lr_mult if 'initial_lr' in g else g['lr']
+    muon_momentum = get_muon_momentum(step)
+    for g in muon.param_groups: g['momentum'] = muon_momentum
 
     for micro_step in range(grad_accum_steps):
         x, y = next(train_loader)
@@ -79,6 +87,8 @@ for step in range(args.num_iterations):
 
     adamw.step(); muon.step()
     adamw.zero_grad(); muon.zero_grad()
+    nan_params = [(n, p.shape) for n, p in model.named_parameters() if torch.isnan(p).any()]
+    if nan_params: print(f"  NAN in params: {nan_params}")
 
     if step % 1 == 0:
         dt = time.time() - t0

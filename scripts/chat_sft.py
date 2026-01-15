@@ -21,6 +21,7 @@ parser.add_argument('--num_iterations', type=int, default=1000)
 parser.add_argument('--embedding_lr', type=float, default=0.002)
 parser.add_argument('--unembedding_lr', type=float, default=0.0004)
 parser.add_argument('--matrix_lr', type=float, default=0.002)
+parser.add_argument('--use_muon', type=int, default=1)
 parser.add_argument('--cooldown_iters', type=int, default=20)
 parser.add_argument('--eval_every', type=int, default=100)
 parser.add_argument('--run', type=str, default="dummy")
@@ -36,6 +37,8 @@ model_config = GPTConfig(**meta["model_config"])
 sft_checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", f"d{model_config.n_layer}")
 model = model.bfloat16()
 print(f"Loaded model: {model.num_params():,} parameters")
+nan_params = sum(1 for p in model.parameters() if torch.isnan(p).any())
+print(f"Params with nan: {nan_params}")
 
 tokenizer = get_tokenizer()
 train_ds = TaskMixture([SmolTalk(split="train", stop=10000), ARC(subset="ARC-Easy", split="train"), ARC(subset="ARC-Challenge", split="train")])
@@ -45,7 +48,8 @@ val_gen = sft_data_generator(val_ds, tokenizer, args.device_batch_size, args.max
 
 matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
 adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr}], betas=(0.9, 0.95), weight_decay=0.0)
-muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
+if args.use_muon: muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
+else: muon = torch.optim.AdamW(matrix_params, lr=args.matrix_lr, betas=(0.9, 0.95), weight_decay=0.0)
 optimizers = [adamw, muon]
 for opt in optimizers:
     for g in opt.param_groups: g['initial_lr'] = g['lr']
@@ -61,6 +65,7 @@ for step in range(args.num_iterations):
 
     for micro_step in range(grad_accum_steps):
         x, y = next(train_gen)
+        if (y != -1).sum().item() == 0: continue
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
             loss = model(x, y) / grad_accum_steps
         loss.backward()
@@ -80,8 +85,9 @@ for step in range(args.num_iterations):
         model.eval()
         with torch.no_grad():
             val_loss_sum, val_count = 0.0, 0
-            for _ in range(10):
+            for i in range(10):
                 x, y = next(val_gen)
+                if (y != -1).sum().item() == 0: continue
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                     val_loss_sum += model(x, y).item()
                     val_count += 1
