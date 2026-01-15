@@ -12,12 +12,14 @@ def vl_data_generator(dataset, tokenizer, batch_size, img_size, max_seq_len, dev
     while True:
         batch_imgs, batch_ids, batch_targets = [], [], []
         for _ in range(batch_size):
-            caption, img_data = dataset[cursor]
+            example = dataset[cursor]
+            img_data = example.get("image", None)
             img = torch.randn(3, img_size, img_size) if img_data is None else process_image(img_data, img_size)
-            ids = tokenizer.encode(caption)
+            ids, mask = tokenizer.render_conversation(example)
             batch_imgs.append(img)
             batch_ids.append(ids[:-1])
-            batch_targets.append(ids[1:])
+            tgt = [ids[i+1] if mask[i+1] else -1 for i in range(len(ids)-1)]
+            batch_targets.append(tgt)
             cursor = (cursor + 1) % len(dataset)
         max_len = max_seq_len
         pad_id = tokenizer.encode_special("<|assistant_end|>")

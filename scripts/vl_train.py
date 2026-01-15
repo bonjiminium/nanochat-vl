@@ -46,7 +46,7 @@ matrix_params = [p for n, p in vlm.gpt.named_parameters() if p.ndim == 2 and 'wt
 if args.use_muon: muon = Muon(matrix_params, lr=args.lr_lm, momentum=0.95)
 else: muon = torch.optim.AdamW(matrix_params, lr=args.lr_lm, betas=(0.9, 0.95), weight_decay=0.0)
 
-train_ds = Flickr8k(split="train", cache_dir=base_dir / "flickr8k_cache")
+train_ds = Flickr8k(split="train")
 train_gen = vl_data_generator(train_ds, tokenizer, args.batch_size, args.img_size, args.max_seq_len, device)
 
 wandb_run = DummyWandb() if not args.wandb else __import__('wandb').init(project="nanochat-vl", config=vars(args))
