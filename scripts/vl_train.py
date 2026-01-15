@@ -39,7 +39,7 @@ vlm = VLM(gpt, args.img_size, args.patch_size, args.vision_dim).to(device)
 vlm = torch.compile(vlm)
 
 # Muon for vision/projector: research suggests AdamW for first conv layer, Muon could work for projector but keeping simple
-adamw_params = [{'params': list(vlm.patch_embed.parameters()), 'lr': args.lr_vision}, {'params': list(vlm.proj.parameters()), 'lr': args.lr_projector}, {'params': [vlm.gpt.transformer.wte.weight], 'lr': args.lr_lm * 0.1}, {'params': [vlm.gpt.lm_head.weight], 'lr': args.lr_lm * 0.1}]
+adamw_params = [{'params': list(vlm.vit.parameters()), 'lr': args.lr_vision}, {'params': list(vlm.proj.parameters()), 'lr': args.lr_projector}, {'params': [vlm.gpt.transformer.wte.weight], 'lr': args.lr_lm * 0.1}, {'params': [vlm.gpt.lm_head.weight], 'lr': args.lr_lm * 0.1}]
 adamw = torch.optim.AdamW(adamw_params, betas=(0.9, 0.95), weight_decay=0.1, fused=True)
 
 matrix_params = [p for n, p in vlm.gpt.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
