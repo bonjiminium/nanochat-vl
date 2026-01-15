@@ -10,14 +10,15 @@ from nanochat_vl.common import get_base_dir, DummyWandb
 from nanochat_vl.checkpoint_manager import load_model
 from pathlib import Path
 from nanochat_vl.vl_dataloader import vl_data_generator
+from tasks.flickr8k import Flickr8k
 
 p = argparse.ArgumentParser()
 p.add_argument("--wandb", type=int, default=0)
 p.add_argument("--num_steps", type=int, default=1000)
 p.add_argument("--batch_size", type=int, default=4)
 p.add_argument("--grad_accum", type=int, default=8)
-p.add_argument("--lr_vision", type=float, default=1e-4)
-p.add_argument("--lr_projector", type=float, default=1e-4)
+p.add_argument("--lr_vision", type=float, default=3e-4)
+p.add_argument("--lr_projector", type=float, default=3e-2)
 p.add_argument("--lr_lm", type=float, default=3e-4)
 p.add_argument("--use_muon", type=int, default=0)
 p.add_argument("--img_size", type=int, default=64)
@@ -26,6 +27,7 @@ p.add_argument("--vision_dim", type=int, default=256)
 p.add_argument("--max_seq_len", type=int, default=512)
 p.add_argument("--val_every", type=int, default=100)
 p.add_argument("--save_every", type=int, default=500)
+p.add_argument("--print_every", type=int, default=1)
 args = p.parse_args()
 
 base_dir = Path(get_base_dir())
@@ -37,16 +39,15 @@ vlm = VLM(gpt, args.img_size, args.patch_size, args.vision_dim).to(device)
 vlm = torch.compile(vlm)
 
 # Muon for vision/projector: research suggests AdamW for first conv layer, Muon could work for projector but keeping simple
-vision_proj_params = list(vlm.patch_embed.parameters()) + list(vlm.proj.parameters())
-adamw_params = [{'params': vision_proj_params, 'lr': args.lr_vision}, {'params': [vlm.gpt.transformer.wte.weight], 'lr': args.lr_lm * 0.1}, {'params': [vlm.gpt.lm_head.weight], 'lr': args.lr_lm * 0.1}]
+adamw_params = [{'params': list(vlm.patch_embed.parameters()), 'lr': args.lr_vision}, {'params': list(vlm.proj.parameters()), 'lr': args.lr_projector}, {'params': [vlm.gpt.transformer.wte.weight], 'lr': args.lr_lm * 0.1}, {'params': [vlm.gpt.lm_head.weight], 'lr': args.lr_lm * 0.1}]
 adamw = torch.optim.AdamW(adamw_params, betas=(0.9, 0.95), weight_decay=0.1, fused=True)
 
 matrix_params = [p for n, p in vlm.gpt.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
 if args.use_muon: muon = Muon(matrix_params, lr=args.lr_lm, momentum=0.95)
 else: muon = torch.optim.AdamW(matrix_params, lr=args.lr_lm, betas=(0.9, 0.95), weight_decay=0.0)
 
-dummy_dataset = [("A photo of something interesting.", None) for _ in range(1000)]
-train_gen = vl_data_generator(dummy_dataset, tokenizer, args.batch_size, args.img_size, args.max_seq_len, device)
+train_ds = Flickr8k(split="train", cache_dir=base_dir / "flickr8k_cache")
+train_gen = vl_data_generator(train_ds, tokenizer, args.batch_size, args.img_size, args.max_seq_len, device)
 
 wandb_run = DummyWandb() if not args.wandb else __import__('wandb').init(project="nanochat-vl", config=vars(args))
 
@@ -66,7 +67,7 @@ for step in range(args.num_steps):
     muon.step()
     dt = time.time() - t0
     
-    if step % 10 == 0: print(f"step {step:4d} | loss {loss_accum:.4f} | dt {dt*1000:.0f}ms")
+    if step % args.print_every == 0: print(f"step {step:4d} | loss {loss_accum:.4f} | dt {dt*1000:.0f}ms")
     wandb_run.log(dict(step=step, loss=loss_accum, dt=dt))
     
     if step > 0 and step % args.save_every == 0:

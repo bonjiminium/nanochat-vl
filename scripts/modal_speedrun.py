@@ -256,8 +256,7 @@ def test_vlm():
     gen = vl_data_generator(test_data, tokenizer, batch_size=2, img_size=64, max_seq_len=32, device="cuda")
     imgs, inputs, targets = next(gen)
     loss = vlm(imgs, inputs, targets)
-    print(f"VLM forward pass successful! Loss: {loss.item():.4f}")
-    volume.commit()
+    print(f"VLM forward pass successful! Loss: {loss.item():.3f}")
 
 @app.function(image=image, timeout=900, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_vl_train():
@@ -272,7 +271,7 @@ def test_vl_train():
     if not (base / "mid_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_iterations=12", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=12", "--matrix_lr=0.0002", "--use_muon=0"], check=True)
     if not (base / "chatsft_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=256", "--eval_every=5", "--save_every=10", "--use_muon=0"], check=True)
     print("=== Running VL train for 20 steps ===")
-    subprocess.run(["python", "-u", "-m", "scripts.vl_train", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--lr_vision=1e-4", "--lr_projector=1e-4", "--lr_lm=0", "--use_muon=0"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.vl_train", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--max_seq_len=64", "--use_muon=0", "--print_every=1"], check=True)
     volume.commit()
 
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume})
