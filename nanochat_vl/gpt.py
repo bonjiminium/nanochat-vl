@@ -114,3 +114,8 @@ class GPT(nn.Module):
     def get_device(self): return self.transformer.wte.weight.device
 
     def num_params(self): return sum(p.numel() for p in self.parameters())
+
+    def estimate_flops(self):
+        nparams_emb = self.transformer.wte.weight.numel()
+        l, h, q, t = self.config.n_layer, self.config.n_head, self.config.n_embd // self.config.n_head, self.config.seq_len
+        return 6 * (self.num_params() - nparams_emb) + 12 * l * h * q * t

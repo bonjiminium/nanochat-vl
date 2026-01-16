@@ -47,10 +47,16 @@ cfg = GPTConfig(seq_len=args.max_seq_len, vocab_size=args.vocab_size, n_layer=ar
 model = GPT(cfg).cuda().bfloat16()
 model.init_weights()
 print(f"Model: {model.num_params():,} parameters")
+num_flops_per_token = model.estimate_flops()
+get_max_memory = torch.cuda.max_memory_allocated
+from nanochat_vl.report import get_gpu_info, get_gpu_tflops
+promised_flops_per_sec = get_gpu_tflops(get_gpu_info())
 
+reference_batch_size = 2**19
+batch_lr_scale = (args.total_batch_size / reference_batch_size) ** 0.5
 matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
-adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr}], betas=(0.9, 0.95), weight_decay=0.0)
-muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
+adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr * batch_lr_scale}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr * batch_lr_scale}], betas=(0.9, 0.95), weight_decay=0.0)
+muon = Muon(matrix_params, lr=args.matrix_lr * batch_lr_scale, momentum=0.95)
 
 if args.resume_from >= 0 or (args.resume_from == -1 and os.path.exists(checkpoint_dir)):
     resume_step = args.resume_from if args.resume_from >= 0 else find_last_step(checkpoint_dir)
@@ -107,6 +113,7 @@ def do_checkpoint(step):
     save_checkpoint(checkpoint_dir, step, model_data, optim_data, meta_data)
     print(f"Saved checkpoint at step {step}")
 
+total_training_time, flops_so_far, mfu = 0.0, 0, 0.0
 for step in range(start_step, args.num_iterations):
     if args.eval_every > 0 and step % args.eval_every == 0: run_eval(step)
     if args.core_metric_every > 0 and step % args.core_metric_every == 0: run_core_eval(step)
@@ -124,6 +131,8 @@ for step in range(start_step, args.num_iterations):
         loss.backward()
         total_loss += loss.item()
     
+    muon_momentum = (1 - min(step/300, 1)) * 0.85 + min(step/300, 1) * 0.95
+    for group in muon.param_groups: group["momentum"] = muon_momentum
     muon.step()
     adamw.step()
     muon.zero_grad()
@@ -131,6 +140,10 @@ for step in range(start_step, args.num_iterations):
     
     dt = time.time() - t0
     tokens_per_sec = args.total_batch_size * args.max_seq_len / dt
+    flops_per_sec = num_flops_per_token * args.total_batch_size / dt
+    mfu = 100 * flops_per_sec / promised_flops_per_sec
+    if step > 10: total_training_time += dt
+    flops_so_far = num_flops_per_token * args.total_batch_size * (step + 1)
     wandb_run.log(dict(step=step, loss=total_loss, lr_mult=lr_mult, tokens_per_sec=tokens_per_sec))
     print(f"step {step:4d} | loss {total_loss:.4f} | lr_mult {lr_mult:.2f} | {tokens_per_sec:.0f} tok/s | {dt*1000:.0f}ms")
     if args.save_every > 0 and (step + 1) % args.save_every == 0: do_checkpoint(step)
@@ -141,5 +154,7 @@ wandb_run.finish()
 from nanochat_vl.report import get_report
 get_report().log(section="Base model training", data=[
     vars(args),
-    dict(num_params=model.num_params(), num_iterations=args.num_iterations, final_loss=total_loss, final_val_bpb=val_bpb, min_val_bpb=min_val_bpb),
+    dict(num_params=model.num_params(), num_iterations=args.num_iterations, final_loss=total_loss, final_val_bpb=val_bpb, min_val_bpb=min_val_bpb,
+         mfu_pct=f"{mfu:.2f}%", total_training_flops=f"{flops_so_far:.2e}", total_training_time=f"{total_training_time/60:.2f}m",
+         peak_memory_mib=f"{get_max_memory() / 1024 / 1024:.2f}"),
 ])

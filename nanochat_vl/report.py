@@ -50,20 +50,22 @@ def get_system_info():
     info['working_dir'] = os.getcwd()
     return info
 
-def estimate_cost(gpu_info, runtime_hours=None):
-    gpu_hourly_rates = {'B200': 6.25, 'H200': 4.54, 'H100': 3.95, 'L40S': 1.95, 'A10': 1.10, 'L4': 0.80, 'T4': 0.59}
-    default_rate = 3.0
-    if not gpu_info.get("available"): return None
-    hourly_rate = None
+gpu_peak_tflops = {'B200': 2250, 'H200': 989, 'H100': 989, 'L40S': 362, 'A100': 312, 'A10': 125, 'L4': 121}
+gpu_hourly_rates = {'B200': 6.25, 'H200': 4.54, 'H100': 3.95, 'L40S': 1.95, 'A100': 2.50, 'A10': 1.10, 'L4': 0.80, 'T4': 0.59}
+
+def _lookup_gpu(gpu_info, table, default):
+    if not gpu_info.get("available"): return default
     gpu_name = gpu_info["names"][0] if gpu_info["names"] else "unknown"
-    if 'A100' in gpu_name:
-        hourly_rate = (2.50 if '80GB' in gpu_name else 2.10) * gpu_info["count"]
-    else:
-        for gpu_type, rate in gpu_hourly_rates.items():
-            if gpu_type in gpu_name:
-                hourly_rate = rate * gpu_info["count"]
-                break
-    if hourly_rate is None: hourly_rate = default_rate * gpu_info["count"]
+    for gpu_type, val in table.items():
+        if gpu_type in gpu_name: return val * gpu_info["count"]
+    return default * gpu_info["count"]
+
+def get_gpu_tflops(gpu_info): return _lookup_gpu(gpu_info, {k: v*1e12 for k,v in gpu_peak_tflops.items()}, 989e12)
+
+def estimate_cost(gpu_info, runtime_hours=None):
+    if not gpu_info.get("available"): return None
+    hourly_rate = _lookup_gpu(gpu_info, gpu_hourly_rates, 3.0)
+    gpu_name = gpu_info["names"][0] if gpu_info["names"] else "unknown"
     return dict(hourly_rate=hourly_rate, gpu_type=gpu_name, estimated_total=hourly_rate * runtime_hours if runtime_hours else None)
 
 def get_dep_count(): return int(run_command("pip list --format=freeze | wc -l") or 0)
