@@ -159,6 +159,8 @@ def test_pipeline(git_info: dict = None, bloat_info: dict = None):
     subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "mid", "-x", "20"], check=True)
     subprocess.run(["python", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
     subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "sft", "-x", "20"], check=True)
+    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=50", "--batch_size=2", "--grad_accum=2", "--max_seq_len=64", "--use_muon=0", "--print_every=10"], check=True)
+    subprocess.run(["python", "-m", "scripts.vl_eval", "--max-problems=50", "--batch-size=4"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
@@ -286,11 +288,31 @@ def test_vl_eval():
     if not (base / "base_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.base_train", "--num_steps=20", "--warmdown_steps=5", "--batch_size=2", "--grad_accum=2"], check=True)
     if not (base / "mid_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--use_muon=0"], check=True)
     if not (base / "chatsft_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.chat_sft", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--use_muon=0"], check=True)
-    if not (base / "vlm_last.pt").exists():
+    if not (base / "vl_checkpoints").exists():
         print("=== No VLM checkpoint, running VL train first ===")
         subprocess.run(["python", "-u", "-m", "scripts.vl_train", "--num_steps=50", "--batch_size=2", "--grad_accum=2", "--max_seq_len=64", "--use_muon=0", "--print_every=10"], check=True)
     print("=== Running VL eval on ScienceQA (50 problems) ===")
     subprocess.run(["python", "-u", "-m", "scripts.vl_eval", "--max-problems=50", "--batch-size=4"], check=True)
+
+@app.function(image=image, timeout=1800, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
+def test_vl_report():
+    import os, subprocess
+    os.environ["NANOCHAT_VL_BASE_DIR"] = "/data"
+    from pathlib import Path
+    from nanochat_vl.common import get_base_dir
+    from nanochat_vl.report import get_report
+    base = Path(get_base_dir())
+    if not (base / "tokenizer").exists(): subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--vocab_size", "4096", "--max_chars", "10000000"], check=True)
+    if not (base / "base_data").exists(): subprocess.run(["python", "-u", "-m", "nanochat_vl.data", "--n_shards=1", "--max_chars=10000000"], check=True)
+    if not (base / "base_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.base_train", "--num_steps=20", "--warmdown_steps=5", "--batch_size=2", "--grad_accum=2"], check=True)
+    if not (base / "mid_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--use_muon=0"], check=True)
+    if not (base / "chatsft_checkpoints").exists(): subprocess.run(["python", "-u", "-m", "scripts.chat_sft", "--num_steps=20", "--batch_size=2", "--grad_accum=2", "--use_muon=0"], check=True)
+    if not (base / "vl_checkpoints").exists():
+        subprocess.run(["python", "-u", "-m", "scripts.vl_train", "--num_steps=50", "--batch_size=2", "--grad_accum=2", "--max_seq_len=64", "--use_muon=0", "--print_every=10"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.vl_eval", "--max-problems=50", "--batch-size=4"], check=True)
+    report = get_report()
+    report.generate()
+    print(open(base / "report" / "report.md").read())
 
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume})
 def test_volume():
@@ -316,6 +338,7 @@ def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65
     if test == "vl_train": return test_vl_train.remote()
     if test == "volume": return test_volume.remote()
     if test == "vl_eval": return test_vl_eval.remote()
+    if test == "vl_report": return test_vl_report.remote()
     if test == "chat_eval": return test_chat_eval.remote()
     if test == "mmlu": return test_mmlu.remote()
     if test == "smoltalk": return test_smoltalk.remote()

@@ -7,7 +7,7 @@ from nanochat_vl.gpt import GPT, GPTConfig
 from nanochat_vl.vlm import VLM
 from nanochat_vl.muon import Muon
 from nanochat_vl.common import get_base_dir, DummyWandb
-from nanochat_vl.checkpoint_manager import load_model
+from nanochat_vl.checkpoint_manager import load_model, save_checkpoint
 from pathlib import Path
 from nanochat_vl.vl_dataloader import vl_data_generator
 from tasks.flickr8k import Flickr8k
@@ -71,7 +71,24 @@ for step in range(args.num_steps):
     wandb_run.log(dict(step=step, loss=loss_accum, dt=dt))
     
     if step > 0 and step % args.save_every == 0:
-        torch.save(dict(vlm=vlm.state_dict(), args=vars(args)), base_dir / f"vlm_{step}.pt")
+        checkpoint_dir = base_dir / "vl_checkpoints" / f"d{gpt.config.n_layer}"
+        model_data = {k.removeprefix("_orig_mod."): v for k, v in vlm.state_dict().items()}
+        meta = dict(step=step, loss=loss_accum, vlm_config=dict(img_size=args.img_size, patch_size=args.patch_size, vision_dim=args.vision_dim), model_config=vars(gpt.config))
+        save_checkpoint(checkpoint_dir, step, model_data, None, meta)
 
-torch.save(dict(vlm=vlm.state_dict(), args=vars(args)), base_dir / "vlm_last.pt")
+checkpoint_dir = base_dir / "vl_checkpoints" / f"d{gpt.config.n_layer}"
+model_data = {k.removeprefix("_orig_mod."): v for k, v in vlm.state_dict().items()}
+meta = dict(step=step, loss=loss_accum, vlm_config=dict(img_size=args.img_size, patch_size=args.patch_size, vision_dim=args.vision_dim), model_config=vars(gpt.config))
+save_checkpoint(checkpoint_dir, args.num_steps, model_data, None, meta)
 print("VLM training complete!")
+
+from nanochat_vl.report import get_report
+get_report().log(section="VL Training", data=[
+    {"num_steps": args.num_steps},
+    {"batch_size": args.batch_size},
+    {"grad_accum": args.grad_accum},
+    {"lr_vision": args.lr_vision},
+    {"lr_projector": args.lr_projector},
+    {"lr_lm": args.lr_lm},
+    {"final_loss": loss_accum},
+])

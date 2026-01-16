@@ -6,7 +6,7 @@ from functools import partial
 from nanochat_vl.vlm import VLM
 from nanochat_vl.common import get_base_dir
 from pathlib import Path
-from nanochat_vl.checkpoint_manager import load_model
+from nanochat_vl.checkpoint_manager import load_model, load_checkpoint, find_last_checkpoint_dir, find_last_step
 from nanochat_vl.vl_dataloader import process_image
 from tasks.scienceqa import ScienceQA
 
@@ -67,16 +67,27 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     base_dir = Path(get_base_dir())
     gpt, tokenizer, _ = load_model("sft", device, phase="eval")
-    vlm = VLM(gpt, img_size=args.img_size).to(device)
-    vlm_ckpt = base_dir / "vlm_last.pt"
-    if vlm_ckpt.exists():
-        print(f"Loading VLM checkpoint from {vlm_ckpt}")
-        state_dict = torch.load(vlm_ckpt, map_location=device)["vlm"]
-        state_dict = {k.removeprefix("_orig_mod."): v for k, v in state_dict.items()}
-        vlm.load_state_dict(state_dict)
+    vl_ckpt_dir = find_last_checkpoint_dir(base_dir / "vl_checkpoints")
+    if vl_ckpt_dir:
+        step = find_last_step(vl_ckpt_dir)
+        print(f"Loading VLM checkpoint from {vl_ckpt_dir} step {step}")
+        model_data, _, meta = load_checkpoint(vl_ckpt_dir, step, device)
+        vlm_cfg = meta.get("vlm_config", {})
+        vlm = VLM(gpt, vlm_cfg.get("img_size", args.img_size), vlm_cfg.get("patch_size", 8), vlm_cfg.get("vision_dim", 256)).to(device)
+        vlm.load_state_dict(model_data)
+    else:
+        print("No VLM checkpoint found, using random init")
+        vlm = VLM(gpt, img_size=args.img_size).to(device)
     vlm = torch.compile(vlm)
     vlm.eval()
 
     with torch.amp.autocast(device_type=device, dtype=torch.bfloat16):
         acc = run_vl_eval(args.task_name, vlm, tokenizer, args.batch_size, args.img_size, args.max_problems)
         print(f"{args.task_name} accuracy: {100*acc:.2f}%")
+
+    from nanochat_vl.report import get_report
+    get_report().log(section="VL Evaluation", data=[
+        {"task": args.task_name},
+        {"num_problems": args.max_problems or len(ScienceQA(split="test", only_images=True))},
+        {"accuracy": f"{100*acc:.2f}%"},
+    ])

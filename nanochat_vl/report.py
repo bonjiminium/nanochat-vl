@@ -151,6 +151,7 @@ EXPECTED_FILES = [
     "base-model-training.md", "base-model-loss.md", "base-model-evaluation.md",
     "midtraining.md", "chat-evaluation-mid.md", "chat-sft.md",
     "chat-evaluation-sft.md", "chat-rl.md", "chat-evaluation-rl.md",
+    "vl-training.md", "vl-evaluation.md",
 ]
 
 class Report:
