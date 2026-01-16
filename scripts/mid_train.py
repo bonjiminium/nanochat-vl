@@ -4,7 +4,6 @@ import os, time, argparse
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 from nanochat_vl.gpt import GPT, GPTConfig
-from nanochat_vl.muon import Muon
 from nanochat_vl.common import get_base_dir, DummyWandb
 from nanochat_vl.tokenizer import get_tokenizer, get_token_bytes
 from nanochat_vl.loss_eval import evaluate_bpb
@@ -40,12 +39,7 @@ mid_checkpoint_dir = os.path.join(base_dir, "mid_checkpoints", f"d{model_config.
 model = model.bfloat16()
 print(f"Loaded model: {model.num_params():,} parameters")
 
-matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
-adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr}], betas=(0.9, 0.95), weight_decay=0.0)
-if args.use_muon: muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
-else: muon = torch.optim.AdamW(matrix_params, lr=args.matrix_lr, betas=(0.9, 0.95), weight_decay=0.0)
-for opt in [adamw, muon]:
-    for g in opt.param_groups: g['initial_lr'] = g['lr']
+adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr, unembedding_lr=args.unembedding_lr, matrix_lr=args.matrix_lr)
 
 def get_lr_mult(step):
     if step >= args.num_iterations - args.cooldown_iters: return (args.num_iterations - step) / args.cooldown_iters

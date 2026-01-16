@@ -4,7 +4,6 @@ import os, time, argparse
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 from nanochat_vl.gpt import GPT, GPTConfig
-from nanochat_vl.muon import Muon
 from nanochat_vl.common import get_base_dir, DummyWandb
 from nanochat_vl.tokenizer import get_tokenizer, get_token_bytes
 from nanochat_vl.checkpoint_manager import save_checkpoint, load_model
@@ -46,13 +45,8 @@ val_ds = SmolTalk(split="test", stop=1000)
 train_gen = sft_data_generator(train_ds, tokenizer, args.device_batch_size, args.max_seq_len, device)
 val_gen = sft_data_generator(val_ds, tokenizer, args.device_batch_size, args.max_seq_len, device)
 
-matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
-adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr}], betas=(0.9, 0.95), weight_decay=0.0)
-if args.use_muon: muon = Muon(matrix_params, lr=args.matrix_lr, momentum=0.95)
-else: muon = torch.optim.AdamW(matrix_params, lr=args.matrix_lr, betas=(0.9, 0.95), weight_decay=0.0)
+adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr, unembedding_lr=args.unembedding_lr, matrix_lr=args.matrix_lr)
 optimizers = [adamw, muon]
-for opt in optimizers:
-    for g in opt.param_groups: g['initial_lr'] = g['lr']
 
 grad_accum_steps = args.total_batch_size // args.device_batch_size
 wandb_run = DummyWandb() if args.run == "dummy" else __import__("wandb").init(project="nanochat-vl", name=args.run, config=vars(args))

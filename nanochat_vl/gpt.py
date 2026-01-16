@@ -126,4 +126,8 @@ class GPT(nn.Module):
         matrix_params = [p for n, p in self.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
         adamw = torch.optim.AdamW([{'params': [self.transformer.wte.weight], 'lr': embedding_lr * dmodel_lr_scale}, {'params': [self.lm_head.weight], 'lr': unembedding_lr * dmodel_lr_scale}], betas=adam_betas, weight_decay=weight_decay, fused=True, eps=1e-10)
         muon = Muon(matrix_params, lr=matrix_lr * dmodel_lr_scale, momentum=0.95)
-        return adamw, muon
+        optimizers = [adamw, muon]
+        for opt in optimizers:
+            for group in opt.param_groups:
+                group["initial_lr"] = group["lr"]
+        return optimizers
