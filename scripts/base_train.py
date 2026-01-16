@@ -5,7 +5,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 from nanochat_vl.gpt import GPT, GPTConfig
 from nanochat_vl.dataloader import data_loader
-from nanochat_vl.muon import Muon
+
 from nanochat_vl.common import get_base_dir, DummyWandb
 from nanochat_vl.tokenizer import get_token_bytes
 from nanochat_vl.loss_eval import evaluate_bpb
@@ -54,9 +54,7 @@ promised_flops_per_sec = get_gpu_tflops(get_gpu_info())
 
 reference_batch_size = 2**19
 batch_lr_scale = (args.total_batch_size / reference_batch_size) ** 0.5
-matrix_params = [p for n, p in model.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
-adamw = torch.optim.AdamW([{'params': [model.transformer.wte.weight], 'lr': args.embedding_lr * batch_lr_scale}, {'params': [model.lm_head.weight], 'lr': args.unembedding_lr * batch_lr_scale}], betas=(0.9, 0.95), weight_decay=0.0)
-muon = Muon(matrix_params, lr=args.matrix_lr * batch_lr_scale, momentum=0.95)
+adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr * batch_lr_scale, unembedding_lr=args.unembedding_lr * batch_lr_scale, matrix_lr=args.matrix_lr * batch_lr_scale)
 
 if args.resume_from >= 0 or (args.resume_from == -1 and os.path.exists(checkpoint_dir)):
     resume_step = args.resume_from if args.resume_from >= 0 else find_last_step(checkpoint_dir)

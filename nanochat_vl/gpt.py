@@ -119,3 +119,11 @@ class GPT(nn.Module):
         nparams_emb = self.transformer.wte.weight.numel()
         l, h, q, t = self.config.n_layer, self.config.n_head, self.config.n_embd // self.config.n_head, self.config.seq_len
         return 6 * (self.num_params() - nparams_emb) + 12 * l * h * q * t
+
+    def setup_optimizers(self, embedding_lr=0.3, unembedding_lr=0.004, matrix_lr=0.02, adam_betas=(0.9, 0.95), weight_decay=0.0):
+        from nanochat_vl.muon import Muon
+        dmodel_lr_scale = (self.config.n_embd / 768) ** -0.5
+        matrix_params = [p for n, p in self.named_parameters() if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n]
+        adamw = torch.optim.AdamW([{'params': [self.transformer.wte.weight], 'lr': embedding_lr * dmodel_lr_scale}, {'params': [self.lm_head.weight], 'lr': unembedding_lr * dmodel_lr_scale}], betas=adam_betas, weight_decay=weight_decay, fused=True, eps=1e-10)
+        muon = Muon(matrix_params, lr=matrix_lr * dmodel_lr_scale, momentum=0.95)
+        return adamw, muon
