@@ -8,17 +8,19 @@ image = (
     .add_local_dir('.', '/root')
 )
 
-@app.function(image=image, timeout=3600)
-def speedrun(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, git_info: dict = None, bloat_info: dict = None):
+@app.function(image=image, timeout=7200, gpu="H100", secrets=[modal.Secret.from_name("wandb-secret")])
+def speedrun(run: str = "dummy", git_info: dict = None, bloat_info: dict = None):
     import os
     from nanochat_vl.common import get_base_dir
     from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
     report = get_report()
-    gpu_info = get_gpu_info()
-    report.reset(git_info, bloat_info, gpu_info, get_system_info(), estimate_cost(gpu_info), get_dep_count())
-    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", str(n_shards)], check=True)
-    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars", str(max_chars), "--vocab_size", str(vocab_size)], check=True)
-    subprocess.run(["python", "-m", "scripts.tok_eval"], check=True)
+    report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
+    subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "240"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--max_chars=2000000000", "--vocab_size=32768"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_eval"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=10", "--vocab_size=32768", "--device_batch_size=32", "--eval_every=100", "--eval_tokens=10485760", "--core_metric_every=100", f"--run={run}"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_loss", "--eval_tokens=10485760", "--device_batch_size=32"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_eval", "--max_problems=500", "--batch_size=32"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
@@ -72,6 +74,22 @@ def test_train_med(run: str = "dummy", git_info: dict = None, bloat_info: dict =
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
+@app.function(image=image, timeout=7200, gpu="H100", secrets=[modal.Secret.from_name("wandb-secret")])
+def test_speedrun(run: str = "dummy", git_info: dict = None, bloat_info: dict = None, num_iterations: int = 1400):
+    import os, subprocess
+    from nanochat_vl.common import get_base_dir
+    from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
+    report = get_report()
+    report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
+    subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "240"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--max_chars=2000000000", "--vocab_size=32768"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_eval"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=10", "--vocab_size=32768", "--device_batch_size=32", "--eval_every=100", "--eval_tokens=10485760", "--core_metric_every=-1", f"--run={run}"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_loss", "--eval_tokens=10485760", "--device_batch_size=32"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_eval", "--max_problems=500", "--batch_size=32"], check=True)
+    report.generate()
+    print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
+
 @app.function(image=image, timeout=120, gpu="L4")
 def test_dataloader():
     import subprocess
@@ -113,19 +131,12 @@ def test_bpb():
 
 @app.function(image=image, timeout=600, gpu="L4")
 def test_core():
-    import subprocess, torch
-    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
-    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
-    from nanochat_vl.gpt import GPT, GPTConfig
-    from nanochat_vl.tokenizer import get_tokenizer
-    from nanochat_vl.base_eval import evaluate_model
-    cfg = GPTConfig(seq_len=512, n_layer=2, n_head=2, n_kv_head=2, n_embd=128, vocab_size=4096)
-    model = GPT(cfg).cuda().bfloat16()
-    model.init_weights()
-    model.eval()
-    tokenizer = get_tokenizer()
-    results = evaluate_model(model, tokenizer, 'cuda', max_per_task=5)
-    print(f"CORE metric (untrained, 5/task): {results['core_metric']:.4f}")
+    import subprocess
+    subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_loss", "--eval_tokens=1024", "--device_batch_size=4"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_eval", "--max_problems=20", "--batch_size=8"], check=True)
 
 @app.function(image=image, timeout=180, gpu="L4")
 def test_checkpoint():
@@ -166,17 +177,18 @@ def test_pipeline(git_info: dict = None, bloat_info: dict = None):
     from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
     report = get_report()
     report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
-    subprocess.run(["python", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
-    subprocess.run(["python", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
-    subprocess.run(["python", "-m", "scripts.tok_eval"], check=True)
-    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--embedding_lr=0.003", "--unembedding_lr=0.0001", "--matrix_lr=0.0003", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
-    subprocess.run(["python", "-m", "scripts.base_loss", "--eval_tokens=1024", "--device_batch_size=4"], check=True)
-    subprocess.run(["python", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
-    subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "mid", "-x", "20"], check=True)
-    subprocess.run(["python", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
-    subprocess.run(["python", "-m", "scripts.chat_eval", "-i", "sft", "-x", "20"], check=True)
-    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=50", "--batch_size=2", "--grad_accum=2", "--max_seq_len=64", "--use_muon=0", "--print_every=10"], check=True)
-    subprocess.run(["python", "-m", "scripts.vl_eval", "--max-problems=50", "--batch-size=4"], check=True)
+    subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_eval"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=2", "--n_embd=128", "--n_head=2", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=16", "--num_iterations=20", "--warmup_iters=2", "--cooldown_iters=2", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_loss", "--eval_tokens=1024", "--device_batch_size=4"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_eval", "--max_problems=20", "--batch_size=8"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.chat_eval", "-i", "mid", "-x", "20"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.chat_eval", "-i", "sft", "-x", "20"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.vl_train", "--num_steps=50", "--batch_size=2", "--grad_accum=2", "--max_seq_len=64", "--use_muon=0", "--print_every=10"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.vl_eval", "--max-problems=50", "--batch-size=4"], check=True)
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
@@ -349,7 +361,7 @@ def test_volume():
     volume.commit()
 
 @app.local_entrypoint()
-def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65536, test: str = "", run: str = "dummy"):
+def main(test: str = "", run: str = "dummy", num_iterations: int = 0):
     if test == "vlm": return test_vlm.remote()
     if test == "vl_train": return test_vl_train.remote()
     if test == "volume": return test_volume.remote()
@@ -370,6 +382,9 @@ def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65
     if test == "train_med":
         from nanochat_vl.report import get_git_info, get_bloat_info
         return test_train_med.remote(run=run, git_info=get_git_info(), bloat_info=get_bloat_info())
+    if test == "speedrun":
+        from nanochat_vl.report import get_git_info, get_bloat_info
+        return test_speedrun.remote(run=run, git_info=get_git_info(), bloat_info=get_bloat_info(), num_iterations=num_iterations or 1400)
     if test == "dataloader": return test_dataloader.remote()
     if test == "bpb": return test_bpb.remote()
     if test == "core": return test_core.remote()
@@ -378,5 +393,4 @@ def main(n_shards: int = 8, max_chars: int = 2_000_000_000, vocab_size: int = 65
         from nanochat_vl.report import get_git_info, get_bloat_info
         return test_report.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
     from nanochat_vl.report import get_git_info, get_bloat_info
-    git_info, bloat_info = get_git_info(), get_bloat_info()
-    speedrun.remote(n_shards, max_chars, vocab_size, git_info, bloat_info)
+    speedrun.remote(run=run, git_info=get_git_info(), bloat_info=get_bloat_info())

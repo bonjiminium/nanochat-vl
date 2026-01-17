@@ -19,7 +19,7 @@ parser.add_argument('--num_iterations', type=int, default=100)
 parser.add_argument('--embedding_lr', type=float, default=0.02)
 parser.add_argument('--unembedding_lr', type=float, default=0.0004)
 parser.add_argument('--matrix_lr', type=float, default=0.002)
-parser.add_argument('--use_muon', type=int, default=1)
+
 parser.add_argument('--cooldown_iters', type=int, default=20)
 parser.add_argument('--eval_every', type=int, default=25)
 parser.add_argument('--eval_tokens', type=int, default=10*524288)

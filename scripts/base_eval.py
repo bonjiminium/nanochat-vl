@@ -1,7 +1,11 @@
-"Evaluate CORE metric for a given model."
-import os, csv, time, json, yaml, random, zipfile, tempfile, shutil
+"Evaluate CORE metric for a base model."
+
+import os, csv, time, json, yaml, random, zipfile, tempfile, shutil, argparse
+import torch
 from nanochat_vl.common import get_base_dir, download_file
 from nanochat_vl.core_eval import evaluate_task
+from nanochat_vl.checkpoint_manager import load_model
+from nanochat_vl.tokenizer import get_tokenizer
 
 EVAL_BUNDLE_URL = "https://karpathy-public.s3.us-west-2.amazonaws.com/eval_bundle.zip"
 
@@ -44,6 +48,23 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
         print(f"acc: {accuracy:.4f} | centered: {centered:.4f} | {time.time() - t0:.1f}s")
     core_metric = sum(centered_results.values()) / len(centered_results)
     print(f"CORE metric: {core_metric:.4f}")
-    from nanochat_vl.report import get_report
-    get_report().log(section="Base model evaluation", data=[{"CORE metric": core_metric}, centered_results])
     return dict(results=results, centered_results=centered_results, core_metric=core_metric)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--max_problems', type=int, default=-1)
+    parser.add_argument('--batch_size', type=int, default=8)
+    args = parser.parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, tokenizer, meta = load_model("base", device)
+    model.eval()
+    
+    with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+        out = evaluate_model(model, tokenizer, device, max_per_task=args.max_problems)
+    
+    from nanochat_vl.report import get_report
+    get_report().log(section="Base model evaluation", data=[{"CORE metric": out["core_metric"]}, out["centered_results"]])
+
+if __name__ == "__main__":
+    main()

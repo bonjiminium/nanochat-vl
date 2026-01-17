@@ -10,14 +10,19 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.bfloat16()
     if G.size(-2) > G.size(-1): X = X.mT
-    for _ in range(steps): X = a * X + b * (X @ X.mT) @ X + c * (X @ X.mT) @ (X @ X.mT) @ X
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) + 1e-7)
+    for _ in range(steps):
+        A = X @ X.mT
+        X = a * X + (b * A + c * A @ A) @ X
     if G.size(-2) > G.size(-1): X = X.mT
     return X
 
 class Muon(torch.optim.Optimizer):
     def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
+        params = list(params)
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
-        super().__init__(params, defaults)
+        param_groups = [dict(params=[p for p in params if p.numel() == size]) for size in {p.numel() for p in params}]
+        super().__init__(param_groups, defaults)
 
     @torch.no_grad()
     def step(self):
