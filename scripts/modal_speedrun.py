@@ -192,6 +192,19 @@ def test_pipeline(git_info: dict = None, bloat_info: dict = None):
     report.generate()
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
 
+@app.function(image=image, timeout=600, secrets=[modal.Secret.from_name("huggingface-secret")])
+def test_tokenizer(git_info: dict = None, bloat_info: dict = None):
+    import os, subprocess
+    from nanochat_vl.common import get_base_dir
+    from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
+    report = get_report()
+    report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
+    subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "16"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--max_chars=4000000000", "--vocab_size=65536"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_eval"], check=True)
+    report.generate()
+    print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
+
 @app.function(image=image, timeout=60, gpu="L4")
 def test_mid_dataloader():
     import subprocess
@@ -392,5 +405,8 @@ def main(test: str = "", run: str = "dummy", num_iterations: int = 0):
     if test == "report":
         from nanochat_vl.report import get_git_info, get_bloat_info
         return test_report.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
+    if test == "tokenizer":
+        from nanochat_vl.report import get_git_info, get_bloat_info
+        return test_tokenizer.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
     from nanochat_vl.report import get_git_info, get_bloat_info
     speedrun.remote(run=run, git_info=get_git_info(), bloat_info=get_bloat_info())
