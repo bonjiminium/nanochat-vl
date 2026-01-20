@@ -51,8 +51,12 @@ train_gen = vl_data_generator(train_ds, tokenizer, args.batch_size, args.img_siz
 
 wandb_run = DummyWandb() if not args.wandb else __import__('wandb').init(project="nanochat-vl", config=vars(args))
 
+num_flops_per_token = gpt.estimate_flops()
+smooth_loss, total_time, ema_beta = 0.0, 0.0, 0.9
+tokens_per_step = args.batch_size * args.max_seq_len * args.grad_accum
+t0 = time.time()
+
 for step in range(args.num_steps):
-    t0 = time.time()
     adamw.zero_grad()
     muon.zero_grad()
     loss_accum = 0.0
@@ -65,9 +69,17 @@ for step in range(args.num_steps):
     loss_accum /= args.grad_accum
     adamw.step()
     muon.step()
+    torch.cuda.synchronize()
     dt = time.time() - t0
+    total_time += dt
+    t0 = time.time()
+    smooth_loss = ema_beta * smooth_loss + (1 - ema_beta) * loss_accum
+    debiased_loss = smooth_loss / (1 - ema_beta ** (step + 1))
+    pct = 100 * step / args.num_steps
+    tok_per_sec = int(tokens_per_step / dt)
+    mfu = 100 * num_flops_per_token * tokens_per_step / dt / 989e12
     
-    if step % args.print_every == 0: print(f"step {step:4d} | loss {loss_accum:.4f} | dt {dt*1000:.0f}ms")
+    if step % args.print_every == 0: print(f"step {step:05d} ({pct:5.2f}%) | loss {debiased_loss:.6f} | lrm 1.00 | dt {dt*1000:.2f}ms | tok/s {tok_per_sec:,} | mfu {mfu:.2f}% | time {total_time/60:.2f}m")
     wandb_run.log(dict(step=step, loss=loss_accum, dt=dt))
     
     if step > 0 and step % args.save_every == 0:

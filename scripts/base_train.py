@@ -158,6 +158,7 @@ for step in range(start_step, num_iterations):
     for group in muon.param_groups: group["momentum"] = muon_momentum
     muon.step()
     adamw.step()
+    torch.cuda.synchronize()
     muon.zero_grad()
     adamw.zero_grad()
     

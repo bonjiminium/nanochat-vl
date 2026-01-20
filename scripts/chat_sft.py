@@ -23,6 +23,7 @@ parser.add_argument('--matrix_lr', type=float, default=0.002)
 
 parser.add_argument('--cooldown_iters', type=int, default=20)
 parser.add_argument('--eval_every', type=int, default=100)
+parser.add_argument('--eval_steps', type=int, default=100)
 parser.add_argument('--run', type=str, default="dummy")
 parser.add_argument('--save_every', type=int, default=-1)
 parser.add_argument('--mid_step', type=int, default=-1)
@@ -35,6 +36,7 @@ model, _, meta = load_model("mid", device, phase="train", step=args.mid_step if 
 model_config = GPTConfig(**meta["model_config"])
 sft_checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", f"d{model_config.n_layer}")
 model = model.bfloat16()
+model = torch.compile(model, dynamic=False)
 print(f"Loaded model: {model.num_params():,} parameters")
 nan_params = sum(1 for p in model.parameters() if torch.isnan(p).any())
 print(f"Params with nan: {nan_params}")
@@ -52,8 +54,11 @@ grad_accum_steps = args.total_batch_size // args.device_batch_size
 wandb_run = DummyWandb() if args.run == "dummy" else __import__("wandb").init(project="nanochat-vl", name=args.run, config=vars(args))
 
 min_val_loss = float('inf')
+num_flops_per_token = model.estimate_flops()
+smooth_loss, total_time, ema_beta = 0.0, 0.0, 0.9
+t0 = time.time()
+
 for step in range(args.num_iterations):
-    t0 = time.time()
     model.train()
     for opt in optimizers: opt.zero_grad(set_to_none=True)
 
@@ -67,27 +72,36 @@ for step in range(args.num_iterations):
     for opt in optimizers: opt.step()
     torch.cuda.synchronize()
     dt = time.time() - t0
+    total_time += dt
+    t0 = time.time()
 
     lr_mult = 1.0 if step >= args.cooldown_iters else min(1.0, (args.num_iterations - step) / args.cooldown_iters)
     for opt in optimizers:
         for g in opt.param_groups: g['lr'] = g['initial_lr'] * lr_mult
 
-    if step % 1 == 0: print(f"step {step:4d} | loss {loss.item()*grad_accum_steps:.4f} | dt {int(dt*1000)}ms")
-    wandb_run.log(dict(step=step, loss=loss.item()*grad_accum_steps))
+    train_loss = loss.item() * grad_accum_steps
+    smooth_loss = ema_beta * smooth_loss + (1 - ema_beta) * train_loss
+    debiased_loss = smooth_loss / (1 - ema_beta ** (step + 1))
+    pct = 100 * step / args.num_iterations
+    tok_per_sec = int(args.total_batch_size / dt)
+    mfu = 100 * num_flops_per_token * args.total_batch_size / dt / 989e12
+    print(f"step {step:05d} ({pct:5.2f}%) | loss {debiased_loss:.6f} | lrm {lr_mult:.2f} | dt {dt*1000:.2f}ms | tok/s {tok_per_sec:,} | mfu {mfu:.2f}% | time {total_time/60:.2f}m")
+    wandb_run.log(dict(step=step, loss=train_loss))
 
     if args.eval_every > 0 and step % args.eval_every == 0:
         model.eval()
+        eval_steps = args.eval_steps
         with torch.no_grad():
             val_loss_sum, val_count = 0.0, 0
-            for i in range(10):
+            for i in range(eval_steps):
                 x, y = next(val_gen)
                 if (y != -1).sum().item() == 0: continue
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                     val_loss_sum += model(x, y).item()
                     val_count += 1
-            val_loss = val_loss_sum / val_count
+            val_loss = val_loss_sum / max(val_count, 1)
         if val_loss < min_val_loss: min_val_loss = val_loss
-        print(f"step {step:4d} | val_loss {val_loss:.4f} | min_val_loss {min_val_loss:.4f}")
+        print(f"step {step:05d} | val_loss {val_loss:.4f} | min_val_loss {min_val_loss:.4f}")
         wandb_run.log(dict(step=step, val_loss=val_loss, min_val_loss=min_val_loss))
         model.train()
 

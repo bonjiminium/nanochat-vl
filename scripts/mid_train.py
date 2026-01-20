@@ -21,7 +21,7 @@ parser.add_argument('--unembedding_lr', type=float, default=0.004)
 parser.add_argument('--matrix_lr', type=float, default=0.02)
 
 parser.add_argument('--eval_every', type=int, default=25)
-parser.add_argument('--eval_tokens', type=int, default=10*524288)
+parser.add_argument('--eval_tokens', type=int, default=20*524288)
 parser.add_argument('--run', type=str, default='dummy')
 parser.add_argument('--save_every', type=int, default=-1)
 parser.add_argument('--base_step', type=int, default=-1)
@@ -36,6 +36,7 @@ model, _, meta = load_model("base", "cuda", phase="train", step=args.base_step i
 model_config = GPTConfig(**meta["model_config"])
 mid_checkpoint_dir = os.path.join(base_dir, "mid_checkpoints", f"d{model_config.n_layer}")
 model = model.bfloat16()
+model = torch.compile(model, dynamic=False)
 print(f"Loaded model: {model.num_params():,} parameters")
 
 adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr, unembedding_lr=args.unembedding_lr, matrix_lr=args.matrix_lr)
@@ -62,6 +63,8 @@ else:
     wandb_run = wandb.init(project='nanochat-vl', name=args.run, config=vars(args))
 
 min_val_bpb, val_bpb = float('inf'), float('inf')
+num_flops_per_token = model.estimate_flops()
+smooth_loss, total_time, ema_beta = 0.0, 0.0, 0.9
 t0 = time.time()
 
 for step in range(args.num_iterations):
@@ -77,23 +80,29 @@ for step in range(args.num_iterations):
             loss = model(x, y) / grad_accum_steps
         loss.backward()
 
-    adamw.step(); muon.step()
+    adamw.step(); muon.step(); torch.cuda.synchronize()
     adamw.zero_grad(); muon.zero_grad()
     nan_params = [(n, p.shape) for n, p in model.named_parameters() if torch.isnan(p).any()]
     if nan_params: print(f"  NAN in params: {nan_params}")
 
-    if step % 1 == 0:
-        dt = time.time() - t0
-        print(f"step {step:4d} | loss {loss.item()*grad_accum_steps:.4f} | dt {dt*1000:.0f}ms")
-        wandb_run.log(dict(step=step, loss=loss.item()*grad_accum_steps, lr_mult=lr_mult))
-        t0 = time.time()
+    dt = time.time() - t0
+    if step > 10: total_time += dt
+    train_loss = loss.item() * grad_accum_steps
+    smooth_loss = ema_beta * smooth_loss + (1 - ema_beta) * train_loss
+    debiased_loss = smooth_loss / (1 - ema_beta ** (step + 1))
+    pct = 100 * step / args.num_iterations
+    tok_per_sec = int(args.total_batch_size / dt)
+    mfu = 100 * num_flops_per_token * args.total_batch_size / dt / 989e12
+    print(f"step {step:05d} ({pct:5.2f}%) | loss {debiased_loss:.6f} | lrm {lr_mult:.2f} | dt {dt*1000:.2f}ms | tok/s {tok_per_sec:,} | mfu {mfu:.2f}% | time {total_time/60:.2f}m")
+    wandb_run.log(dict(step=step, loss=train_loss, lr_mult=lr_mult))
+    t0 = time.time()
 
     if args.eval_every > 0 and (step + 1) % args.eval_every == 0:
         model.eval()
         eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len)
         val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
         min_val_bpb = min(min_val_bpb, val_bpb)
-        print(f"step {step:4d} | val_bpb {val_bpb:.4f} | min_val_bpb {min_val_bpb:.4f}")
+        print(f"step {step:05d} | val_bpb {val_bpb:.4f} | min_val_bpb {min_val_bpb:.4f}")
         wandb_run.log(dict(step=step, val_bpb=val_bpb, min_val_bpb=min_val_bpb))
         model.train()
 
