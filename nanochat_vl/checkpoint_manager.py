@@ -18,10 +18,11 @@ def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
     return model_data, optimizer_data, meta_data
 
 def find_last_checkpoint_dir(base_checkpoint_dir):
-    subdirs = glob.glob(os.path.join(base_checkpoint_dir, "d*"))
-    for d in sorted(subdirs, reverse=True):
-        if glob.glob(os.path.join(d, "model_*.pt")): return d
-    return None
+    import re
+    subdirs = [d for d in glob.glob(os.path.join(base_checkpoint_dir, "d*")) if glob.glob(os.path.join(d, "model_*.pt"))]
+    if not subdirs: return None
+    def depth(d): m = re.match(r"d(\d+)", os.path.basename(d)); return int(m.group(1)) if m else 0
+    return max(subdirs, key=depth)
 
 def find_last_step(checkpoint_dir):
     files = glob.glob(os.path.join(checkpoint_dir, "model_*.pt"))

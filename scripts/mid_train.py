@@ -16,11 +16,10 @@ parser.add_argument('--max_seq_len', type=int, default=2048)
 parser.add_argument('--device_batch_size', type=int, default=4)
 parser.add_argument('--total_batch_size', type=int, default=32)
 parser.add_argument('--num_iterations', type=int, default=100)
-parser.add_argument('--embedding_lr', type=float, default=0.02)
-parser.add_argument('--unembedding_lr', type=float, default=0.0004)
-parser.add_argument('--matrix_lr', type=float, default=0.002)
+parser.add_argument('--embedding_lr', type=float, default=0.2)
+parser.add_argument('--unembedding_lr', type=float, default=0.004)
+parser.add_argument('--matrix_lr', type=float, default=0.02)
 
-parser.add_argument('--cooldown_iters', type=int, default=20)
 parser.add_argument('--eval_every', type=int, default=25)
 parser.add_argument('--eval_tokens', type=int, default=10*524288)
 parser.add_argument('--run', type=str, default='dummy')
@@ -41,9 +40,8 @@ print(f"Loaded model: {model.num_params():,} parameters")
 
 adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr, unembedding_lr=args.unembedding_lr, matrix_lr=args.matrix_lr)
 
-def get_lr_mult(step):
-    if step >= args.num_iterations - args.cooldown_iters: return (args.num_iterations - step) / args.cooldown_iters
-    return 1.0
+def get_lr_mult(progress):
+    return 1.0 if progress < 0.8 else 1 - (progress - 0.8) / 0.2
 
 def get_muon_momentum(step):
     frac = min(step / 300, 1)
@@ -67,7 +65,7 @@ min_val_bpb, val_bpb = float('inf'), float('inf')
 t0 = time.time()
 
 for step in range(args.num_iterations):
-    lr_mult = get_lr_mult(step)
+    lr_mult = get_lr_mult(step / args.num_iterations)
     for opt in [adamw, muon]:
         for g in opt.param_groups: g['lr'] = g['initial_lr'] * lr_mult if 'initial_lr' in g else g['lr']
     muon_momentum = get_muon_momentum(step)

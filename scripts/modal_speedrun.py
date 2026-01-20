@@ -222,6 +222,18 @@ def test_mid_dataloader():
     x2, y2 = next(gen)
     print(f"Second batch x[0,:10]: {x2[0,:10].tolist()}")
 
+@app.function(image=image, timeout=60, gpu="L4")
+def test_mid(git_info: dict = None, bloat_info: dict = None):
+    import subprocess
+    from nanochat_vl.report import get_report, get_gpu_info, get_system_info, estimate_cost, get_dep_count
+    report = get_report()
+    report.reset(git_info or {}, bloat_info or {}, get_gpu_info(), get_system_info(), estimate_cost(get_gpu_info()), get_dep_count())
+    subprocess.run(["python", "-u", "-m", "nanochat_vl.dataset", "-n", "2"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.tok_train", "--max_chars=10000000", "--vocab_size=4096"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.base_train", "--depth=2", "--aspect_ratio=64", "--head_dim=64", "--max_seq_len=64", "--vocab_size=4096", "--device_batch_size=4", "--total_batch_size=256", "--num_iterations=20", "--warmup_ratio=0.1", "--warmdown_ratio=0.2", "--eval_every=5", "--eval_tokens=1024", "--core_metric_every=-1", "--save_every=20"], check=True)
+    subprocess.run(["python", "-u", "-m", "scripts.mid_train", "--num_iterations=10", "--device_batch_size=4", "--max_seq_len=64", "--eval_every=5", "--save_every=10"], check=True)
+    report.generate()
+
 @app.function(image=image, timeout=600, gpu="L4", secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_chat_eval():
     import subprocess
@@ -384,6 +396,9 @@ def main(test: str = "", run: str = "dummy", num_iterations: int = 0):
     if test == "mmlu": return test_mmlu.remote()
     if test == "smoltalk": return test_smoltalk.remote()
     if test == "mid_dataloader": return test_mid_dataloader.remote()
+    if test == "mid":
+        from nanochat_vl.report import get_git_info, get_bloat_info
+        return test_mid.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
     if test == "pipeline":
         from nanochat_vl.report import get_git_info, get_bloat_info
         return test_pipeline.remote(git_info=get_git_info(), bloat_info=get_bloat_info())
