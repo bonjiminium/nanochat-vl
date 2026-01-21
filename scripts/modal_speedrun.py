@@ -42,6 +42,11 @@ def ensure_sft():
     if has_checkpoint("sft"): return
     subprocess.run(["python", "-m", "scripts.chat_sft", "--num_iterations=10", "--device_batch_size=4", "--target_examples_per_step=32", "--max_seq_len=1024", "--eval_every=-1", "--eval_steps=4", "--save_every=10"], check=True)
 
+def ensure_vl():
+    ensure_sft()
+    if has_checkpoint("vl"): return
+    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=20", "--batch_size=2", "--grad_accum=1", "--use_images=1", "--print_every=10"], check=True)
+
 @app.function(image=image, timeout=7200, gpu="H100", secrets=[modal.Secret.from_name("wandb-secret")])
 def speedrun(run: str = "dummy", git_info: dict = None, bloat_info: dict = None):
     from nanochat_vl.common import get_base_dir
@@ -88,21 +93,17 @@ def test_vl():
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_temp():
     setup_env()
-    ensure_sft()
+    ensure_vl()
     import subprocess
     
     print("="*60)
-    print("VL ABLATION TEST: A-OKVQA with/without images")
+    print("VL EVAL TEST: A-OKVQA")
     print("="*60)
     
-    print("\n[1] Training VL (use_images=1) for 10 steps...")
-    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=10", "--batch_size=2", "--grad_accum=1", "--use_images=1", "--print_every=5"], check=True)
-    
-    print("\n[2] Training text-only (use_images=0) for 10 steps...")
-    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=10", "--batch_size=2", "--grad_accum=1", "--use_images=0", "--print_every=5"], check=True)
+    subprocess.run(["python", "-m", "scripts.vl_eval", "--task-name=AOKVQA", "--max-problems=10", "--batch-size=2", "--use-images=1"], check=True)
     
     print("\n" + "="*60)
-    print("ABLATION TEST COMPLETE")
+    print("EVAL TEST COMPLETE")
     print("="*60)
 
 @app.local_entrypoint()
