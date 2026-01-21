@@ -58,17 +58,22 @@ class VLM(nn.Module):
         self.vit = ViT(img_size, patch_size, 3, vision_dim, vit_layers, vit_heads)
         self.proj = Projector(vision_dim, gpt.config.n_embd)
     
-    def forward(self, img, input_ids, targets=None):
-        img_emb = self.proj(self.vit(img))
+    def forward(self, imgs, input_ids, targets=None, img_token_id=None):
+        B, T = input_ids.shape
         tok_emb = norm(self.gpt.transformer.wte(input_ids))
-        img_emb = img_emb.to(tok_emb.dtype)
-        x = torch.cat([img_emb, tok_emb], dim=1)
-        B, T, _ = x.size()
+        if imgs is not None and img_token_id is not None:
+            img_emb = self.proj(self.vit(imgs.to(tok_emb.dtype))).to(tok_emb.dtype)
+            img_emb = img_emb.view(-1, img_emb.size(-1))
+            mask = (input_ids == img_token_id)
+            num_img_tokens, num_img_emb = mask.sum().item(), img_emb.size(0)
+            if num_img_tokens != num_img_emb: print(f"WARNING: image token mismatch! {num_img_tokens} tokens in input but {num_img_emb} image embeddings. Sequence truncation is dropping images - increase max_seq_len!")
+            tok_emb[mask] = img_emb[:num_img_tokens]
+        x = tok_emb
         cos_sin = self.gpt.cos[:, :T], self.gpt.sin[:, :T]
         for block in self.gpt.transformer.h: x = block(x, cos_sin)
         x = norm(x)
         logits = self.gpt.lm_head(x)[..., :self.gpt.config.vocab_size].float()
         logits = 15 * torch.tanh(logits / 15)
         if targets is None: return logits
-        txt_logits = logits[:, img_emb.size(1):, :]
-        return F.cross_entropy(txt_logits.reshape(-1, txt_logits.size(-1)), targets.reshape(-1), ignore_index=-1)
+        if img_token_id is not None: targets = targets.masked_fill(targets == img_token_id, -1)
+        return F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-1)

@@ -13,5 +13,5 @@ class Flickr8k(Task):
 
     def get_example(self, index):
         row = self.ds[index]
-        messages = [{"role": "user", "content": "Describe this image."}, {"role": "assistant", "content": row["caption_4"]}]
-        return {"messages": messages, "image": row["image"]}
+        messages = [{"role": "user", "content": "<|image|>\nDescribe this image."}, {"role": "assistant", "content": row["caption_4"]}]
+        return {"messages": messages, "images": [row["image"]]}

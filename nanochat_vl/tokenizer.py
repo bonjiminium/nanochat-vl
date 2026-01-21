@@ -10,6 +10,7 @@ SPECIAL_TOKENS = [
     "<|assistant_start|>", "<|assistant_end|>",
     "<|python_start|>", "<|python_end|>",
     "<|output_start|>", "<|output_end|>",
+    "<image>",
 ]
 
 SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,2}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
@@ -115,6 +116,32 @@ class RustBPETokenizer:
                 add_tokens(self.encode(content), 1)  # mask=1: supervise these
                 add_tokens(assistant_end, 1)
 
+        return ids[:max_tokens], mask[:max_tokens]
+
+    def render_conversation_vl(self, conversation, img_token_id, num_patches, max_tokens=2048):
+        ids, mask = [], []
+        def add_tokens(token_ids, mask_val):
+            if isinstance(token_ids, int): token_ids = [token_ids]
+            ids.extend(token_ids); mask.extend([mask_val] * len(token_ids))
+        def encode_with_images(content, mask_val):
+            parts = content.split("<|image|>")
+            for i, part in enumerate(parts):
+                add_tokens(self.encode(part), mask_val)
+                if i < len(parts) - 1: add_tokens([img_token_id] * num_patches, mask_val)
+        messages = conversation["messages"]
+        if messages[0]["role"] == "system":
+            messages = messages[1:]
+            messages[0]["content"] = conversation["messages"][0]["content"] + "\n\n" + messages[0]["content"]
+        add_tokens(self.get_bos_token_id(), 0)
+        for msg in messages:
+            if msg["role"] == "user":
+                add_tokens(self.encode_special("<|user_start|>"), 0)
+                encode_with_images(msg["content"], 0)
+                add_tokens(self.encode_special("<|user_end|>"), 0)
+            elif msg["role"] == "assistant":
+                add_tokens(self.encode_special("<|assistant_start|>"), 0)
+                encode_with_images(msg["content"], 1)
+                add_tokens(self.encode_special("<|assistant_end|>"), 1)
         return ids[:max_tokens], mask[:max_tokens]
 
     def render_for_completion(self, conversation):

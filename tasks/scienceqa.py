@@ -19,9 +19,9 @@ class ScienceQA(Task):
         row = self.ds[index]
         question, choices, answer = row["question"], row["choices"], row["answer"]
         letters = [chr(ord('A') + i) for i in range(len(choices))]
-        user_message = render_mc(question, letters, choices)
+        user_message = f"<|image|>\n{render_mc(question, letters, choices)}"
         messages = [{"role": "user", "content": user_message}, {"role": "assistant", "content": letters[answer]}]
-        return dict(messages=messages, letters=letters, image=row["image"])
+        return dict(messages=messages, letters=letters, images=[row["image"]])
 
     def evaluate(self, conversation, assistant_response):
         return assistant_response == conversation['messages'][-1]['content']

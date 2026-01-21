@@ -27,8 +27,9 @@ parser.add_argument('--save_every', type=int, default=-1)
 parser.add_argument('--base_step', type=int, default=-1)
 args = parser.parse_args()
 
-assert args.total_batch_size % args.device_batch_size == 0
-grad_accum_steps = args.total_batch_size // args.device_batch_size
+tokens_per_fwdbwd = args.device_batch_size * args.max_seq_len
+assert args.total_batch_size % tokens_per_fwdbwd == 0, f"total_batch_size ({args.total_batch_size}) must be divisible by tokens_per_fwdbwd ({tokens_per_fwdbwd})"
+grad_accum_steps = args.total_batch_size // tokens_per_fwdbwd
 
 base_dir = get_base_dir()
 

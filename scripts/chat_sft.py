@@ -15,7 +15,7 @@ from tasks.common import TaskMixture
 parser = argparse.ArgumentParser()
 parser.add_argument('--max_seq_len', type=int, default=512)
 parser.add_argument('--device_batch_size', type=int, default=4)
-parser.add_argument('--total_batch_size', type=int, default=32)
+parser.add_argument('--target_examples_per_step', type=int, default=32)
 parser.add_argument('--num_iterations', type=int, default=1000)
 parser.add_argument('--embedding_lr', type=float, default=0.002)
 parser.add_argument('--unembedding_lr', type=float, default=0.0004)
@@ -36,10 +36,8 @@ model, _, meta = load_model("mid", device, phase="train", step=args.mid_step if 
 model_config = GPTConfig(**meta["model_config"])
 sft_checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", f"d{model_config.n_layer}")
 model = model.bfloat16()
-model = torch.compile(model, dynamic=False)
+# model = torch.compile(model) # doesn't work well with variable-length inputs
 print(f"Loaded model: {model.num_params():,} parameters")
-nan_params = sum(1 for p in model.parameters() if torch.isnan(p).any())
-print(f"Params with nan: {nan_params}")
 
 tokenizer = get_tokenizer()
 train_ds = TaskMixture([SmolTalk(split="train", stop=10000), ARC(subset="ARC-Easy", split="train"), ARC(subset="ARC-Challenge", split="train")])
@@ -50,7 +48,7 @@ val_gen = sft_data_generator(val_ds, tokenizer, args.device_batch_size, args.max
 adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr, unembedding_lr=args.unembedding_lr, matrix_lr=args.matrix_lr)
 optimizers = [adamw, muon]
 
-grad_accum_steps = args.total_batch_size // args.device_batch_size
+grad_accum_steps = args.target_examples_per_step // args.device_batch_size
 wandb_run = DummyWandb() if args.run == "dummy" else __import__("wandb").init(project="nanochat-vl", name=args.run, config=vars(args))
 
 min_val_loss = float('inf')
@@ -83,8 +81,8 @@ for step in range(args.num_iterations):
     smooth_loss = ema_beta * smooth_loss + (1 - ema_beta) * train_loss
     debiased_loss = smooth_loss / (1 - ema_beta ** (step + 1))
     pct = 100 * step / args.num_iterations
-    tok_per_sec = int(args.total_batch_size / dt)
-    mfu = 100 * num_flops_per_token * args.total_batch_size / dt / 989e12
+    tok_per_sec = int(args.target_examples_per_step * args.max_seq_len / dt)
+    mfu = 100 * num_flops_per_token * args.target_examples_per_step * args.max_seq_len / dt / 989e12
     print(f"step {step:05d} ({pct:5.2f}%) | loss {debiased_loss:.6f} | lrm {lr_mult:.2f} | dt {dt*1000:.2f}ms | tok/s {tok_per_sec:,} | mfu {mfu:.2f}% | time {total_time/60:.2f}m")
     wandb_run.log(dict(step=step, loss=train_loss))
 
