@@ -61,8 +61,11 @@ class VLM(nn.Module):
     def forward(self, imgs, input_ids, targets=None, img_token_id=None):
         B, T = input_ids.shape
         tok_emb = norm(self.gpt.transformer.wte(input_ids))
+        self.text_norm = tok_emb.detach().norm(dim=-1).mean().item()
+        self.vision_norm = 0.0
         if imgs is not None and imgs.numel() > 0 and img_token_id is not None:
-            img_emb = self.proj(self.vit(imgs.to(tok_emb.dtype))).to(tok_emb.dtype)
+            img_emb = norm(self.proj(self.vit(imgs.to(tok_emb.dtype)))).to(tok_emb.dtype)
+            self.vision_norm = img_emb.detach().norm(dim=-1).mean().item()
             img_emb = img_emb.view(-1, img_emb.size(-1))
             mask = (input_ids == img_token_id)
             num_img_tokens, num_img_emb = mask.sum().item(), img_emb.size(0)

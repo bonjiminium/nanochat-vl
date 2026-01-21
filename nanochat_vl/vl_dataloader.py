@@ -5,8 +5,14 @@ IMAGE_PLACEHOLDER = "<|image|>"
 
 def process_image(img, size):
     if isinstance(img, str): img = Image.open(img)
-    img = img.convert("RGB").resize((size, size), Image.BILINEAR)
-    x = torch.tensor(np.array(img)).permute(2, 0, 1).float() / 255.0
+    img = img.convert("RGB")
+    w, h = img.size
+    scale = size / max(w, h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    img = img.resize((new_w, new_h), Image.BILINEAR)
+    padded = Image.new("RGB", (size, size), (128, 128, 128))
+    padded.paste(img, ((size - new_w) // 2, (size - new_h) // 2))
+    x = torch.tensor(np.array(padded)).permute(2, 0, 1).float() / 255.0
     return (x - 0.5) / 0.5
 
 def tokenize_with_images(text, tokenizer, img_token_id, num_patches):

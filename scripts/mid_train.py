@@ -14,7 +14,7 @@ from tasks.smoltalk import SmolTalk
 parser = argparse.ArgumentParser()
 parser.add_argument('--max_seq_len', type=int, default=2048)
 parser.add_argument('--device_batch_size', type=int, default=4)
-parser.add_argument('--total_batch_size', type=int, default=32)
+parser.add_argument('--total_batch_size', type=int, default=524288)
 parser.add_argument('--num_iterations', type=int, default=100)
 parser.add_argument('--embedding_lr', type=float, default=0.2)
 parser.add_argument('--unembedding_lr', type=float, default=0.004)

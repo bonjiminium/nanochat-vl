@@ -93,18 +93,19 @@ def test_vl():
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_temp():
     setup_env()
-    ensure_vl()
+    ensure_sft()
     import subprocess
-    
-    print("="*60)
-    print("VL EVAL TEST: A-OKVQA")
-    print("="*60)
-    
-    subprocess.run(["python", "-m", "scripts.vl_eval", "--task-name=AOKVQA", "--max-problems=10", "--batch-size=2", "--use-images=1"], check=True)
-    
-    print("\n" + "="*60)
-    print("EVAL TEST COMPLETE")
-    print("="*60)
+    print("Training VL with 224x224 images...")
+    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=20", "--device_batch_size=2", "--target_examples_per_step=8", "--use_images=1", "--print_every=5"], check=True)
+    print("Testing vl_eval with verbose output (5 examples)...")
+    result = subprocess.run(["python", "-m", "scripts.vl_eval", "--task-name=AOKVQA", "--max-problems=5", "--use-images=1"], capture_output=True, text=True)
+    print(result.stdout)
+    if result.returncode != 0:
+        print("STDERR:", result.stderr)
+        raise RuntimeError("vl_eval failed")
+    print("SUCCESS: vl_eval works")
+
+
 
 @app.local_entrypoint()
 def main(test: str = "", run: str = "dummy"):

@@ -70,10 +70,13 @@ def run_categorical_eval(task_object, tokenizer, vlm, batch_size, img_size, patc
             letter_ids = [letter_to_id_cache[l] for l in letters]
             focus_logits = logits[idx, answer_positions[idx], letter_ids]
             predicted = letters[focus_logits.argmax(dim=-1).item()]
-            num_passed += int(task_object.evaluate(conv, predicted))
+            correct = task_object.evaluate(conv, predicted)
+            expected = conv["messages"][-1]["content"]
+            print(f"[{i0+idx:3d}] pred={predicted} exp={expected} {'✓' if correct else '✗'}")
+            num_passed += int(correct)
             total += 1
 
-        print(f"\r{num_passed}/{total} ({100*num_passed/total:.1f}%)", end='', flush=True)
+        print(f"Running: {num_passed}/{total} ({100*num_passed/total:.1f}%)")
 
     print()
     acc = num_passed / total
@@ -94,8 +97,8 @@ if __name__ == "__main__":
     p.add_argument('-a', '--task-name', type=str, default='AOKVQA')
     p.add_argument('-b', '--batch-size', type=int, default=8)
     p.add_argument('-x', '--max-problems', type=int, default=None)
-    p.add_argument('--img-size', type=int, default=64)
-    p.add_argument('--patch-size', type=int, default=8)
+    p.add_argument('--img-size', type=int, default=224)
+    p.add_argument('--patch-size', type=int, default=16)
     p.add_argument('--use-images', type=int, default=1)
     args = p.parse_args()
 
