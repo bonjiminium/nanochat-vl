@@ -88,84 +88,21 @@ def test_vl():
 @app.function(image=image, timeout=300, gpu="L4", volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_temp():
     setup_env()
-    ensure_tokenizer()
-    import torch
-    from nanochat_vl.tokenizer import get_tokenizer
-    from nanochat_vl.vl_dataloader import vl_data_generator
-    from nanochat_vl.vlm import VLM
-    from nanochat_vl.gpt import GPT, GPTConfig
-    from tasks.scienceqa import ScienceQA
-    
-    tok = get_tokenizer()
-    img_token_id = tok.encode_special("<image>")
-    img_size, patch_size = 64, 8
-    num_patches = (img_size // patch_size) ** 2
+    ensure_sft()
+    import subprocess
     
     print("="*60)
-    print("EMBEDDING INJECTION VERIFICATION")
+    print("VL ABLATION TEST: A-OKVQA with/without images")
     print("="*60)
     
-    print(f"\n[1] Config: img_size={img_size}, patch_size={patch_size}, num_patches={num_patches}, img_token_id={img_token_id}")
+    print("\n[1] Training VL (use_images=1) for 10 steps...")
+    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=10", "--batch_size=2", "--grad_accum=1", "--use_images=1", "--print_every=5"], check=True)
     
-    ds = ScienceQA(split="train")
-    gen = vl_data_generator(ds, tok, batch_size=2, img_size=img_size, max_seq_len=256, num_patches=num_patches, device="cuda")
-    imgs, inputs, targets = next(gen)
-    
-    print(f"\n[2] Dataloader output:")
-    print(f"    imgs.shape: {imgs.shape} (expected: [N, 3, {img_size}, {img_size}])")
-    print(f"    inputs.shape: {inputs.shape}")
-    print(f"    targets.shape: {targets.shape}")
-    
-    mask = (inputs == img_token_id)
-    num_img_tokens = mask.sum().item()
-    num_images = imgs.shape[0]
-    expected_tokens = num_images * num_patches
-    print(f"\n[3] Token count check:")
-    print(f"    Images in batch: {num_images}")
-    print(f"    Image tokens in inputs: {num_img_tokens}")
-    print(f"    Expected (images * patches): {expected_tokens}")
-    print(f"    MATCH: {num_img_tokens == expected_tokens}")
-    
-    print(f"\n[4] Token positions per sequence:")
-    for b in range(inputs.shape[0]):
-        seq_mask = mask[b]
-        positions = seq_mask.nonzero(as_tuple=True)[0].tolist()
-        if positions: print(f"    seq {b}: {len(positions)} tokens at positions {positions[0]}..{positions[-1]}")
-        else: print(f"    seq {b}: no image tokens")
-    
-    cfg = GPTConfig(seq_len=256, vocab_size=4096, n_layer=2, n_head=2, n_kv_head=2, n_embd=128)
-    gpt = GPT(cfg).cuda().bfloat16()
-    gpt.init_weights()
-    vlm = VLM(gpt, vision_dim=256, img_size=img_size, patch_size=patch_size, vit_layers=2).cuda().bfloat16()
-    
-    print(f"\n[5] Embedding shapes in forward pass:")
-    tok_emb = torch.nn.functional.rms_norm(gpt.transformer.wte(inputs), (gpt.config.n_embd,))
-    img_emb = vlm.proj(vlm.vit(imgs.to(tok_emb.dtype))).to(tok_emb.dtype)
-    print(f"    tok_emb before injection: {tok_emb.shape}")
-    print(f"    img_emb from ViT+proj: {img_emb.shape} -> flattened: {img_emb.view(-1, img_emb.size(-1)).shape}")
-    
-    print(f"\n[6] Embedding values at image positions (before vs after):")
-    tok_emb_before = tok_emb.clone()
-    img_emb_flat = img_emb.view(-1, img_emb.size(-1))
-    tok_emb[mask] = img_emb_flat[:num_img_tokens]
-    diff = (tok_emb[mask] - tok_emb_before[mask]).abs().mean().item()
-    print(f"    Mean abs diff at image positions: {diff:.4f}")
-    print(f"    First image emb (5 vals): {img_emb_flat[0, :5].tolist()}")
-    print(f"    tok_emb at first img pos (5 vals): {tok_emb[mask][0, :5].tolist()}")
-    print(f"    INJECTED CORRECTLY: {torch.allclose(tok_emb[mask], img_emb_flat[:num_img_tokens])}")
-    
-    print(f"\n[7] Forward + backward:")
-    loss = vlm(imgs, inputs, targets, img_token_id=img_token_id)
-    print(f"    loss: {loss.item():.4f}")
-    loss.backward()
-    vit_grad = vlm.vit.patch_embed.proj.weight.grad
-    proj_grad = vlm.proj.proj.weight.grad
-    print(f"    ViT patch_embed grad norm: {vit_grad.norm().item():.6f}")
-    print(f"    Projector grad norm: {proj_grad.norm().item():.6f}")
-    print(f"    GRADIENTS FLOW: {vit_grad.norm().item() > 0 and proj_grad.norm().item() > 0}")
+    print("\n[2] Training text-only (use_images=0) for 10 steps...")
+    subprocess.run(["python", "-m", "scripts.vl_train", "--num_steps=10", "--batch_size=2", "--grad_accum=1", "--use_images=0", "--print_every=5"], check=True)
     
     print("\n" + "="*60)
-    print("VERIFICATION COMPLETE")
+    print("ABLATION TEST COMPLETE")
     print("="*60)
 
 @app.local_entrypoint()

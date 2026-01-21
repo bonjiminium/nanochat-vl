@@ -61,7 +61,7 @@ class VLM(nn.Module):
     def forward(self, imgs, input_ids, targets=None, img_token_id=None):
         B, T = input_ids.shape
         tok_emb = norm(self.gpt.transformer.wte(input_ids))
-        if imgs is not None and img_token_id is not None:
+        if imgs is not None and imgs.numel() > 0 and img_token_id is not None:
             img_emb = self.proj(self.vit(imgs.to(tok_emb.dtype))).to(tok_emb.dtype)
             img_emb = img_emb.view(-1, img_emb.size(-1))
             mask = (input_ids == img_token_id)

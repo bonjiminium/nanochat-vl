@@ -1,7 +1,11 @@
 "Minimal single-GPU VLM training script."
 
-import os, time, argparse
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+import os, time, argparse, logging
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["TORCH_LOGS"] = "-dynamo"
+logging.getLogger("torch._dynamo").setLevel(logging.ERROR)
+import warnings
+warnings.filterwarnings("ignore", message=".*IndexPutBackward0.*")
 import torch
 from nanochat_vl.gpt import GPT, GPTConfig
 from nanochat_vl.vlm import VLM
@@ -10,7 +14,7 @@ from nanochat_vl.common import get_base_dir, DummyWandb
 from nanochat_vl.checkpoint_manager import load_model, save_checkpoint
 from pathlib import Path
 from nanochat_vl.vl_dataloader import vl_data_generator
-from tasks.flickr8k import Flickr8k
+from tasks.aokvqa import AOKVQA
 
 p = argparse.ArgumentParser()
 p.add_argument("--wandb", type=int, default=0)
@@ -28,6 +32,8 @@ p.add_argument("--max_seq_len", type=int, default=512)
 p.add_argument("--val_every", type=int, default=100)
 p.add_argument("--save_every", type=int, default=500)
 p.add_argument("--print_every", type=int, default=1)
+p.add_argument("--use_images", type=int, default=1)
+p.add_argument("--task", type=str, default="aokvqa")
 args = p.parse_args()
 
 base_dir = Path(get_base_dir())
@@ -46,7 +52,7 @@ matrix_params = [p for n, p in vlm.gpt.named_parameters() if p.ndim == 2 and 'wt
 if args.use_muon: muon = Muon(matrix_params, lr=args.lr_lm, momentum=0.95)
 else: muon = torch.optim.AdamW(matrix_params, lr=args.lr_lm, betas=(0.9, 0.95), weight_decay=0.0)
 
-train_ds = Flickr8k(split="train")
+train_ds = AOKVQA(split="train", use_images=bool(args.use_images))
 img_token_id = tokenizer.encode_special("<image>")
 num_patches = (args.img_size // args.patch_size) ** 2
 train_gen = vl_data_generator(train_ds, tokenizer, args.batch_size, args.img_size, args.max_seq_len, num_patches, device)
