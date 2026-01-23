@@ -151,15 +151,13 @@ def sft_real(run: str = "dummy", git_info: dict = None, bloat_info: dict = None,
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
     volume.commit()
 
-@app.function(image=image, gpu="L4", timeout=600, volumes={"/data": volume})
+@app.function(image=image, gpu="H100", timeout=14400, volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_temp():
     setup_env()
-    from nanochat_vl.common import get_base_dir
-    from nanochat_vl.checkpoint_manager import find_last_checkpoint_dir
-    import os, glob
-    base_dir = os.path.join(get_base_dir(), "mid_checkpoints")
-    print(f"All dirs in mid_checkpoints: {os.listdir(base_dir)}")
-    print(f"find_last_checkpoint_dir returns: {find_last_checkpoint_dir(base_dir)}")
+    ensure_sft(test=False)
+    run_script("scripts.vl_train", {**VL_REAL, "use_images": 0, "num_steps": 1})
+    run_script("scripts.vl_eval", dict(task_name="AOKVQA", max_problems=500, use_images=0))
+    volume.commit()
 
 @app.function(image=image, gpu="L4", timeout=600, volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def vl_test(eval_only: bool = False):
