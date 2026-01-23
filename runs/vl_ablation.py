@@ -33,7 +33,7 @@ def ensure_base(batch_size):
     ensure_tokenizer()
     ensure_data()
     if has_checkpoint("base"): return
-    subprocess.run(["python", "-m", "scripts.base_train", "--depth=2", "--num_iterations=20", f"--device_batch_size={batch_size}", f"--total_batch_size={batch_size*1024}", "--max_seq_len=1024", "--eval_every=-1", "--core_metric_every=-1", "--save_every=20"], check=True)
+    subprocess.run(["python", "-m", "scripts.base_train", "--depth=8", "--num_iterations=20", f"--device_batch_size={batch_size}", f"--total_batch_size={batch_size*1024}", "--max_seq_len=1024", "--eval_every=-1", "--core_metric_every=-1", "--save_every=20"], check=True)
 
 def ensure_mid(batch_size):
     ensure_base(batch_size)

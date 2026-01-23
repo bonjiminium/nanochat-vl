@@ -59,9 +59,9 @@ def run_chat_eval(task_name, model, tokenizer, batch_size=8, max_problems=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--source', type=str, required=True, help="Source: base|mid|sft|rl")
-    parser.add_argument('-a', '--task-name', type=str, default=None, help="Task name (default=all)")
-    parser.add_argument('-b', '--batch-size', type=int, default=8)
-    parser.add_argument('-x', '--max-problems', type=int, default=None)
+    parser.add_argument('-a', '--task_name', type=str, default=None, help="Task name (default=all)")
+    parser.add_argument('-b', '--batch_size', type=int, default=8)
+    parser.add_argument('-x', '--max_problems', type=int, default=None)
     args = parser.parse_args()
 
     model, _, meta = load_model(args.source, "cuda", phase="eval")

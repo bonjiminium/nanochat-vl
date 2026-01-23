@@ -10,6 +10,8 @@ from nanochat_vl.loss_eval import evaluate_bpb
 from nanochat_vl.checkpoint_manager import save_checkpoint, load_checkpoint, find_last_step, load_model
 from nanochat_vl.mid_dataloader import mid_data_generator
 from tasks.smoltalk import SmolTalk
+from tasks.mmlu import MMLU
+from tasks.common import TaskMixture
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--max_seq_len', type=int, default=2048)
@@ -50,7 +52,7 @@ def get_muon_momentum(step):
     return (1 - frac) * 0.85 + frac * 0.95
 
 tokenizer = get_tokenizer()
-train_ds = SmolTalk(split="train")
+train_ds = TaskMixture([SmolTalk(split="train"), MMLU(subset="auxiliary_train", split="train")])
 val_ds = SmolTalk(split="test", stop=1000)
 train_loader = mid_data_generator(train_ds, tokenizer, args.device_batch_size, args.max_seq_len, device='cuda')
 val_loader = mid_data_generator(val_ds, tokenizer, args.device_batch_size, args.max_seq_len, device='cuda')
@@ -112,6 +114,7 @@ for step in range(args.num_iterations):
 
 final_loss = loss.item() * grad_accum_steps
 print(f"Training complete. Final loss: {final_loss:.4f}, min_val_bpb: {min_val_bpb:.4f}")
+save_checkpoint(mid_checkpoint_dir, args.num_iterations, model.state_dict(), dict(adamw=adamw.state_dict(), muon=muon.state_dict()), dict(step=args.num_iterations, val_bpb=val_bpb, min_val_bpb=min_val_bpb, config=vars(args), model_config=model_config.__dict__))
 
 from nanochat_vl.report import get_report
 get_report().log(section="Midtraining", data=[vars(args), dict(num_iterations=args.num_iterations, min_val_bpb=min_val_bpb)])

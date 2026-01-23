@@ -20,8 +20,7 @@ parser.add_argument('--num_iterations', type=int, default=1000)
 parser.add_argument('--embedding_lr', type=float, default=0.2)
 parser.add_argument('--unembedding_lr', type=float, default=0.004)
 parser.add_argument('--matrix_lr', type=float, default=0.02)
-
-parser.add_argument('--cooldown_iters', type=int, default=20)
+parser.add_argument('--init_lr_frac', type=float, default=0.02)
 parser.add_argument('--eval_every', type=int, default=100)
 parser.add_argument('--eval_steps', type=int, default=100)
 parser.add_argument('--run', type=str, default="dummy")
@@ -47,6 +46,8 @@ val_gen = sft_data_generator(val_ds, tokenizer, args.device_batch_size, args.max
 
 adamw, muon = model.setup_optimizers(embedding_lr=args.embedding_lr, unembedding_lr=args.unembedding_lr, matrix_lr=args.matrix_lr)
 optimizers = [adamw, muon]
+for opt in optimizers:
+    for g in opt.param_groups: g['lr'], g['initial_lr'] = g['lr'] * args.init_lr_frac, g['lr'] * args.init_lr_frac
 
 grad_accum_steps = args.target_examples_per_step // args.device_batch_size
 wandb_run = DummyWandb() if args.run == "dummy" else __import__("wandb").init(project="nanochat-vl", name=args.run, config=vars(args))
@@ -73,7 +74,7 @@ for step in range(args.num_iterations):
     total_time += dt
     t0 = time.time()
 
-    lr_mult = 1.0 if step >= args.cooldown_iters else min(1.0, (args.num_iterations - step) / args.cooldown_iters)
+    lr_mult = 1.0 - step / args.num_iterations
     for opt in optimizers:
         for g in opt.param_groups: g['lr'] = g['initial_lr'] * lr_mult
 
@@ -110,6 +111,7 @@ for step in range(args.num_iterations):
 
 final_loss = loss.item() * grad_accum_steps
 print(f"Training complete. Final loss: {final_loss:.4f}, min_val_loss: {min_val_loss:.4f}")
+save_checkpoint(sft_checkpoint_dir, args.num_iterations, model.state_dict(), dict(adamw=adamw.state_dict(), muon=muon.state_dict()), dict(step=args.num_iterations, min_val_loss=min_val_loss, config=vars(args), model_config=model_config.__dict__))
 
 from nanochat_vl.report import get_report
 get_report().log(section="Chat SFT", data=[vars(args), dict(num_iterations=args.num_iterations, min_val_loss=min_val_loss)])

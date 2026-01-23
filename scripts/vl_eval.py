@@ -94,12 +94,12 @@ def run_vl_eval(task_name, vlm, tokenizer, batch_size, img_size, patch_size, img
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument('-a', '--task-name', type=str, default='AOKVQA')
-    p.add_argument('-b', '--batch-size', type=int, default=8)
-    p.add_argument('-x', '--max-problems', type=int, default=None)
-    p.add_argument('--img-size', type=int, default=224)
-    p.add_argument('--patch-size', type=int, default=16)
-    p.add_argument('--use-images', type=int, default=1)
+    p.add_argument('-a', '--task_name', type=str, default='AOKVQA')
+    p.add_argument('-b', '--batch_size', type=int, default=8)
+    p.add_argument('-x', '--max_problems', type=int, default=None)
+    p.add_argument('--img_size', type=int, default=224)
+    p.add_argument('--patch_size', type=int, default=16)
+    p.add_argument('--use_images', type=int, default=1)
     args = p.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
