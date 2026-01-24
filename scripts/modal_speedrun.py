@@ -151,12 +151,13 @@ def sft_real(run: str = "dummy", git_info: dict = None, bloat_info: dict = None,
     print(open(os.path.join(get_base_dir(), "report", "report.md")).read())
     volume.commit()
 
-@app.function(image=image, gpu="H100", timeout=14400, volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
+VIT_TEST = {"epochs": 1, "batch-size": 8, "log-every": 5, "img-size": 64}
+VIT_REAL = {"epochs": 10, "batch-size": 32, "log-every": 50, "img-size": 64}
+
+@app.function(image=image, gpu="L4", timeout=600, volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
 def test_temp():
     setup_env()
-    ensure_sft(test=False)
-    run_script("scripts.vl_train", {**VL_REAL, "use_images": 0, "num_steps": 1})
-    run_script("scripts.vl_eval", dict(task_name="AOKVQA", max_problems=500, use_images=0))
+    run_script("scripts.vit_pretrain", VIT_TEST)
     volume.commit()
 
 @app.function(image=image, gpu="L4", timeout=600, volumes={"/data": volume}, secrets=[modal.Secret.from_name("huggingface-secret")])
